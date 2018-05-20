@@ -227,83 +227,6 @@ static void create_logical_device(struct vulkan_state *state)
     vkGetDeviceQueue(state->device, queue_info.queueFamilyIndex, 0, &state->queue);
 }
 
-static void initialize_device(struct vulkan_state *state)
-{
-    select_physical_device(state);
-    create_logical_device(state);
-    descriptor_pool_create(state, BUFFER_COUNT);
-    command_pool_create(state);
-    descriptor_set_layouts_create(state, BUFFER_COUNT);
-    descriptor_set_create(state);
-}
-
-static struct gpu_memory allocate_buffer(struct vulkan_state *state, uint64_t size)
-{
-    uint32_t memory_index = UINT32_MAX;
-    VkDeviceSize vk_size = size;
-    VkPhysicalDeviceMemoryProperties props;
-
-    vkGetPhysicalDeviceMemoryProperties(state->phys_device, &props);
-
-    for (uint32_t i = 0; i < props.memoryTypeCount; i++) {
-        VkMemoryType type = props.memoryTypes[i];
-
-        if (type.propertyFlags | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT &&
-            type.propertyFlags | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) {
-            memory_index = i;
-            break;
-        }
-    }
-    assert(memory_index < UINT32_MAX);
-
-    VkMemoryAllocateInfo alloc_info = {
-        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        NULL,
-        vk_size,
-        memory_index
-    };
-
-    VkDeviceMemory vk_memory;
-    CALL_VK(vkAllocateMemory, (state->device, &alloc_info, NULL, &vk_memory));
-
-    VkBufferCreateInfo buffer_info = {
-        VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        NULL,
-        0,
-        vk_size,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        VK_SHARING_MODE_EXCLUSIVE,
-        0,
-        NULL /* ignored since marked as exclusive */
-    };
-
-    VkBuffer vk_buffer;
-    CALL_VK(vkCreateBuffer, (state->device, &buffer_info, NULL, &vk_buffer));
-
-    CALL_VK(vkBindBufferMemory, (state->device, vk_buffer, vk_memory, vk_size));
-
-
-    struct gpu_memory info = {
-        NULL,
-        vk_size,
-        vk_memory,
-        vk_buffer,
-    };
-
-    return info;
-}
-
-static void free_buffer(struct vulkan_state *state, struct gpu_memory *mem)
-{
-    if (mem->buffer) {
-        vkUnmapMemory(state->device, mem->vk_memory);
-        mem->buffer = NULL;
-    }
-
-    vkFreeMemory(state->device, mem->vk_memory, NULL);
-    vkDestroyBuffer(state->device, mem->vk_buffer, NULL);
-}
-
 static void descriptor_set_layouts_create(struct vulkan_state *state, uint32_t count)
 {
     VkDescriptorSetLayoutBinding *bindings = malloc(sizeof(*bindings) * count);
@@ -377,13 +300,14 @@ static void descriptor_set_create(struct vulkan_state *state)
 }
 
 static void descriptor_set_bind(struct vulkan_state *state,
-                              struct gpu_memory *buffer,
-                              uint32_t binding)
+                                VkBuffer buffer,
+                                VkDeviceSize size,
+                                uint32_t binding)
 {
     VkDescriptorBufferInfo buffer_info = {
-        buffer->vk_buffer,
+        buffer,
         0,
-        buffer->vk_size,
+        size,
     };
 
     VkWriteDescriptorSet write_info = {
@@ -401,6 +325,96 @@ static void descriptor_set_bind(struct vulkan_state *state,
 
     vkUpdateDescriptorSets(state->device, 1, &write_info, 0, NULL);
 }
+
+static void initialize_device(struct vulkan_state *state)
+{
+    select_physical_device(state);
+    create_logical_device(state);
+    descriptor_pool_create(state, BUFFER_COUNT);
+    command_pool_create(state);
+    descriptor_set_layouts_create(state, BUFFER_COUNT);
+    descriptor_set_create(state);
+}
+
+static VkDeviceMemory allocate_gpu_memory(struct vulkan_state *state, VkDeviceSize size)
+{
+    uint32_t memory_index = UINT32_MAX;
+    VkPhysicalDeviceMemoryProperties props;
+
+    vkGetPhysicalDeviceMemoryProperties(state->phys_device, &props);
+
+    for (uint32_t i = 0; i < props.memoryTypeCount; i++) {
+        VkMemoryType type = props.memoryTypes[i];
+
+        if (type.propertyFlags | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT &&
+            type.propertyFlags | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) {
+            memory_index = i;
+            break;
+        }
+    }
+    assert(memory_index < UINT32_MAX);
+
+    VkMemoryAllocateInfo alloc_info = {
+        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        NULL,
+        size,
+        memory_index
+    };
+
+    VkDeviceMemory vk_memory;
+    CALL_VK(vkAllocateMemory, (state->device, &alloc_info, NULL, &vk_memory));
+
+    return vk_memory;
+}
+
+static VkBuffer create_gpu_buffer(struct vulkan_state *state, VkDeviceSize size)
+{
+    VkBufferCreateInfo buffer_info = {
+        VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        NULL,
+        0,
+        size,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_SHARING_MODE_EXCLUSIVE,
+        0,
+        NULL /* ignored since marked as exclusive */
+    };
+
+    VkBuffer vk_buffer;
+    CALL_VK(vkCreateBuffer, (state->device, &buffer_info, NULL, &vk_buffer));
+
+    return vk_buffer;
+}
+
+static struct gpu_memory allocate_buffer(struct vulkan_state *state, uint64_t size)
+{
+    VkDeviceSize vk_size = size;
+    VkDeviceMemory vk_memory = allocate_gpu_memory(state, vk_size);
+    VkBuffer vk_buffer = create_gpu_buffer(state, vk_size);
+
+    CALL_VK(vkBindBufferMemory, (state->device, vk_buffer, vk_memory, 0));
+
+    struct gpu_memory info = {
+        NULL,
+        vk_size,
+        vk_memory,
+        vk_buffer,
+    };
+
+    return info;
+}
+
+static void free_buffer(struct vulkan_state *state, struct gpu_memory *mem)
+{
+    if (mem->buffer) {
+        vkUnmapMemory(state->device, mem->vk_memory);
+        mem->buffer = NULL;
+    }
+
+    vkFreeMemory(state->device, mem->vk_memory, NULL);
+    vkDestroyBuffer(state->device, mem->vk_buffer, NULL);
+}
+
 
 static uint32_t* load_shader(const char *path, size_t *file_length)
 {
@@ -562,55 +576,122 @@ static void destroy_state(struct vulkan_state **state)
     *state = NULL;
 }
 
+
+/* Application logic */
+
+static void generate_payload(int *buffer)
+{
+    for (int i = 0; i < ELT_COUNT; i++) {
+        buffer[i] = i;
+    }
+}
+
+static void check_payload(int *buffer)
+{
+    for (int i = 0; i < ELT_COUNT; i++) {
+        if (buffer[i] != i + i) {
+            fprintf(stderr, "invalid value for [%d]. got %d, expected %d\n",
+                    i, buffer[i], i + i);
+        }
+        assert(buffer[i] == i + i);
+    }
+}
+
+static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
+{
+    struct gpu_memory a;
+    void *ptr;
+
+    a = allocate_buffer(state, sizeof(int) * ELT_COUNT);
+    descriptor_set_bind(state, a.vk_buffer, a.vk_size, 0);
+    descriptor_set_bind(state, a.vk_buffer, a.vk_size, 1);
+
+    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
+    generate_payload(ptr);
+    vkUnmapMemory(state->device, a.vk_memory);
+
+    execute_sum_kernel(state);
+
+    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
+    check_payload(ptr);
+    vkUnmapMemory(state->device, a.vk_memory);
+
+    free_buffer(state, &a);
+}
+
+static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
+{
+    VkDeviceMemory memory;
+    VkBuffer buffer_a, buffer_b;
+    void *ptr_a, *ptr_b;
+    VkDeviceSize size = ELT_COUNT * sizeof(int);
+
+    memory = allocate_gpu_memory(state, size * 2);
+    buffer_a = create_gpu_buffer(state, size);
+    buffer_b = create_gpu_buffer(state, size);
+
+    CALL_VK(vkBindBufferMemory, (state->device, buffer_a, memory, 0));
+    CALL_VK(vkBindBufferMemory, (state->device, buffer_b, memory, size));
+
+    descriptor_set_bind(state, buffer_a, size, 0);
+    descriptor_set_bind(state, buffer_b, size, 1);
+
+    CALL_VK(vkMapMemory, (state->device, memory,    0, size, 0, &ptr_a));
+    generate_payload(ptr_a);
+    vkUnmapMemory(state->device, memory);
+
+    execute_sum_kernel(state);
+
+    CALL_VK(vkMapMemory, (state->device, memory, size, size, 0, &ptr_b));
+    check_payload(ptr_b);
+    vkUnmapMemory(state->device, memory);
+
+
+    vkDestroyBuffer(state->device, buffer_a, NULL);
+    vkDestroyBuffer(state->device, buffer_b, NULL);
+    vkFreeMemory(state->device, memory, NULL);
+}
+
+static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
+{
+    struct gpu_memory a, b;
+    void *ptr_a, *ptr_b;
+
+    a = allocate_buffer(state, sizeof(int) * ELT_COUNT);
+    descriptor_set_bind(state, a.vk_buffer, a.vk_size, 0);
+
+    b = allocate_buffer(state, sizeof(int) * ELT_COUNT);
+    descriptor_set_bind(state, b.vk_buffer, b.vk_size, 1);
+
+    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr_a));
+    CALL_VK(vkMapMemory, (state->device, b.vk_memory, 0, b.vk_size, 0, &ptr_b));
+
+    generate_payload(ptr_a);
+    execute_sum_kernel(state);
+    check_payload(ptr_b);
+
+    vkUnmapMemory(state->device, a.vk_memory);
+    vkUnmapMemory(state->device, b.vk_memory);
+
+    free_buffer(state, &a);
+    free_buffer(state, &b);
+}
+
 int main()
 {
     struct vulkan_state *state = NULL;
-    struct gpu_memory buffers[BUFFER_COUNT];
     size_t shader_length;
     uint32_t *shader_code;
 
     state = create_state();
     initialize_device(state);
-
-    /* Creating buffers */
-    for (uint32_t i = 0; i < BUFFER_COUNT; i++) {
-        buffers[i] = allocate_buffer(state, sizeof(*buffers) * ELT_COUNT);
-        descriptor_set_bind(state, &buffers[i], i);
-    }
-
     shader_code = load_shader(SHADER_PATH, &shader_length);
     create_pipeline(state, shader_code, shader_length);
 
-    int *array = NULL;
-    CALL_VK(vkMapMemory,
-            (state->device,
-             buffers[0].vk_memory, 0, buffers[0].vk_size, 0, (void**)&array));
+    do_sum_one_buffer_one_memory(state);
+    do_sum_two_buffer_one_memory(state);
+    do_sum_two_buffer_two_memory(state);
 
-    for (int i = 0; i < ELT_COUNT; i++)
-        array[i] = i;
-
-    vkUnmapMemory(state->device, buffers[0].vk_memory);
-    array = NULL;
-
-    execute_sum_kernel(state);
-
-    CALL_VK(vkMapMemory,
-            (state->device,
-             buffers[1].vk_memory, 0, buffers[1].vk_size, 0, (void**)&array));
-
-    for (int i = 0; i < ELT_COUNT; i++) {
-        printf("%d -> %d\n", i, array[i]);
-        assert(array[i] == i + i);
-    }
-
-    vkUnmapMemory(state->device, buffers[1].vk_memory);
-    array = NULL;
-
-
-
-    /* Cleanup */
-    for (uint32_t i = 0; i < BUFFER_COUNT; i++)
-        free_buffer(state, &buffers[i]);
     destroy_state(&state);
     free(shader_code);
 
