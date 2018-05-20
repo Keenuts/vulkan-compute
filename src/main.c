@@ -15,6 +15,7 @@ struct vulkan_state {
     VkInstance              instance;
     VkPhysicalDevice        phys_device;
     VkDevice                device;
+    VkQueue                 queue;
     uint32_t                queue_family_index;
 
     VkDescriptorPool        descriptor_pool;
@@ -22,7 +23,9 @@ struct vulkan_state {
 
     VkDescriptorSetLayout   descriptor_layout;
     VkDescriptorSet         descriptor_set;
+    VkPipelineLayout        pipeline_layout;
     VkPipeline              pipeline;
+    VkShaderModule          shader_module;
 };
 
 struct gpu_memory {
@@ -190,6 +193,7 @@ static void create_logical_device(struct vulkan_state *state)
     };
 
     CALL_VK(vkCreateDevice, (state->phys_device, &info, NULL, &state->device));
+    vkGetDeviceQueue(state->device, queue_info.queueFamilyIndex, 0, &state->queue);
 }
 
 static void initialize_device(struct vulkan_state *state)
@@ -390,8 +394,6 @@ static void create_pipeline(struct vulkan_state *state,
                             const uint32_t *shader,
                             uint32_t shader_len)
 {
-    VkShaderModule shader_module;
-
     VkShaderModuleCreateInfo shader_info = {
         VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         NULL,
@@ -401,14 +403,14 @@ static void create_pipeline(struct vulkan_state *state,
     };
 
     CALL_VK(vkCreateShaderModule,
-            (state->device, &shader_info, NULL, &shader_module));
+            (state->device, &shader_info, NULL, &state->shader_module));
 
     VkPipelineShaderStageCreateInfo shader_stage_creation_info = {
         VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
         NULL,
         0,
         VK_SHADER_STAGE_COMPUTE_BIT,
-        shader_module,
+        state->shader_module,
         SHADER_ENTRY_POINT,
         NULL
     };
@@ -423,22 +425,84 @@ static void create_pipeline(struct vulkan_state *state,
         NULL
     };
 
-    VkPipelineLayout pipeline_layout;
     CALL_VK(vkCreatePipelineLayout,
-            (state->device, &layout_info, NULL, &pipeline_layout));
+            (state->device, &layout_info, NULL, &state->pipeline_layout));
 
     VkComputePipelineCreateInfo pipeline_info = {
         VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
         NULL,
         0,
         shader_stage_creation_info,
-        pipeline_layout,
+        state->pipeline_layout,
         VK_NULL_HANDLE,
         0
     };
 
     CALL_VK(vkCreateComputePipelines,
             (state->device, VK_NULL_HANDLE, 1, &pipeline_info, NULL, &state->pipeline));
+}
+
+static void execute_sum_kernel(struct vulkan_state *state)
+{
+    VkCommandBuffer command_buffer;
+
+    VkCommandBufferAllocateInfo alloc_info = {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        NULL,
+        state->command_pool,
+        VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        1
+    };
+
+    CALL_VK(vkAllocateCommandBuffers, (state->device, &alloc_info, &command_buffer));
+
+    VkCommandBufferBeginInfo begin_info = {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        NULL,
+        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        NULL
+    };
+
+    CALL_VK(vkBeginCommandBuffer, (command_buffer, &begin_info));
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, state->pipeline);
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                            state->pipeline_layout,
+                            0,
+                            1,
+                            &state->descriptor_set,
+                            0,
+                            NULL);
+
+    vkCmdDispatch(command_buffer, ELT_COUNT / WORKGROUP_SIZE, 1, 1);
+
+    CALL_VK(vkEndCommandBuffer, (command_buffer));
+
+    VkSubmitInfo submit_info = {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        NULL,
+        0,
+        NULL,
+        NULL,
+        1,
+        &command_buffer,
+        0,
+        NULL
+    };
+
+    VkFence fence;
+    VkFenceCreateInfo fence_info = {
+        VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        NULL,
+        0
+    };
+
+    CALL_VK(vkCreateFence, (state->device, &fence_info, NULL, &fence));
+
+    CALL_VK(vkQueueSubmit, (state->queue, 1, &submit_info, fence));
+    CALL_VK(vkWaitForFences, (state->device, 1, &fence, VK_TRUE, 1e9 * 5));
+
+    vkDestroyFence(state->device, fence, NULL);
 }
 
 int main()
@@ -466,12 +530,15 @@ int main()
 
     create_pipeline(state, shader, shader_length);
 
+    execute_sum_kernel(state);
+
     /* Cleanup */
     for (uint32_t i = 0; i < BUFFER_COUNT; i++) {
         free_buffer(state, &buffers[i]);
     }
 
     free(shader);
+    vkDestroyShaderModule(state->device, state->shader_module, NULL);
     vkDestroyDevice(state->device, NULL);
     vkDestroyInstance(state->instance, NULL);
 
