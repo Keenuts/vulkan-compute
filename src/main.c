@@ -1,15 +1,24 @@
 #include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <vulkan/vulkan.h>
 
+#define BUFFER_COUNT 2
+#define SHADER_PATH "./sum.spv"
+#define SHADER_ENTRY_POINT "main"
+
 struct vulkan_state {
-    VkInstance instance;
-    VkPhysicalDevice phys_device;
-    VkDevice device;
-    VkDescriptorSetLayout descriptor_layout;
-    VkDescriptorPool      descriptor_pool;
-    VkDescriptorSet       descriptor_set;
+    VkInstance              instance;
+    VkPhysicalDevice        phys_device;
+    VkDevice                device;
+    VkDescriptorSetLayout   descriptor_layout;
+    VkDescriptorPool        descriptor_pool;
+    VkDescriptorSet         descriptor_set;
+    VkPipeline              pipeline;
 };
 
 struct gpu_memory {
@@ -339,8 +348,80 @@ static void descriptor_set_bind(struct vulkan_state *state,
     vkUpdateDescriptorSets(state->device, 1, &write_info, 0, NULL);
 }
 
-#define BUFFER_COUNT 2
-#define SHADER_PATH "./sum.spv"
+static uint32_t* load_shader(const char *path, size_t *file_length)
+{
+    assert(file_length);
+
+    int fd = open(path, O_RDONLY);
+    assert(fd >= 0);
+
+    size_t size = lseek(fd, 0, SEEK_END);
+    assert(size != (size_t)-1);
+    lseek(fd, 0, SEEK_SET);
+
+    uint32_t *content = malloc(size);
+    assert(content);
+    assert(read(fd, content, size) >= 0);
+    close(fd);
+
+    *file_length = size;
+    return content;
+}
+
+static void create_pipeline(struct vulkan_state *state,
+                            const uint32_t *shader,
+                            uint32_t shader_len)
+{
+    VkShaderModule shader_module;
+
+    VkShaderModuleCreateInfo shader_info = {
+        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        NULL,
+        0,
+        shader_len,
+        shader
+    };
+
+    CALL_VK(vkCreateShaderModule,
+            (state->device, &shader_info, NULL, &shader_module));
+
+    VkPipelineShaderStageCreateInfo shader_stage_creation_info = {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        NULL,
+        0,
+        VK_SHADER_STAGE_COMPUTE_BIT,
+        shader_module,
+        SHADER_ENTRY_POINT,
+        NULL
+    };
+
+    VkPipelineLayoutCreateInfo layout_info = {
+        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        NULL,
+        0,
+        1,
+        &state->descriptor_layout,
+        0,
+        NULL
+    };
+
+    VkPipelineLayout pipeline_layout;
+    CALL_VK(vkCreatePipelineLayout,
+            (state->device, &layout_info, NULL, &pipeline_layout));
+
+    VkComputePipelineCreateInfo pipeline_info = {
+        VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        NULL,
+        0,
+        shader_stage_creation_info,
+        pipeline_layout,
+        VK_NULL_HANDLE,
+        0
+    };
+
+    CALL_VK(vkCreateComputePipelines,
+            (state->device, VK_NULL_HANDLE, 1, &pipeline_info, NULL, &state->pipeline));
+}
 
 int main()
 {
@@ -359,11 +440,18 @@ int main()
         descriptor_set_bind(state, &buffers[i], i);
     }
 
+    size_t shader_length;
+    uint32_t *shader = load_shader(SHADER_PATH, &shader_length);
+    printf("shader loaded (%zu bytes)\n", shader_length);
+
+    create_pipeline(state, shader, shader_length);
+
     /* Cleanup */
     for (uint32_t i = 0; i < BUFFER_COUNT; i++) {
         free_buffer(state, &buffers[i]);
     }
 
+    free(shader);
     vkDestroyDevice(state->device, NULL);
     vkDestroyInstance(state->instance, NULL);
 
