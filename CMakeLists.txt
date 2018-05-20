@@ -5,6 +5,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 link_libraries(vulkan)
 
+set(ELT_COUNT 1000)
+
 set(CMAKE_C_FLAGS_DEBUG "\
     -Wall \
     -Wextra \
@@ -12,7 +14,8 @@ set(CMAKE_C_FLAGS_DEBUG "\
     -Wno-unused-function \
     -g \
     -O0 \
-    -Werror"
+    -Werror\
+    -DELT_COUNT=${ELT_COUNT}"
 )
 set(CMAKE_C_FLAGS_RELEASE "-O3")
 
