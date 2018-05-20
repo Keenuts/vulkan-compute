@@ -89,7 +89,31 @@ static void check_vkresult(VkResult res)
 
 #define CALL_VK(Func, Param) check_vkresult(Func Param)
 
-static struct vulkan_state* initialize_vulkan(void)
+static void dump_available_layers(void)
+{
+    uint32_t layer_count;
+    CALL_VK(vkEnumerateInstanceLayerProperties, (&layer_count, NULL));
+
+    if (layer_count == 0) {
+        fprintf(stderr, "no layers available.\n");
+        return;
+    }
+
+    VkLayerProperties *layers = malloc(sizeof(*layers) * layer_count);
+    assert(layers);
+
+
+    CALL_VK(vkEnumerateInstanceLayerProperties, (&layer_count, layers));
+
+    fprintf(stderr, "layers:\n");
+    for (uint32_t i = 0; i < layer_count; i++) {
+        fprintf(stderr, "\t%s: %s\n", layers[i].layerName, layers[i].description);
+    }
+
+    free(layers);
+}
+
+static struct vulkan_state* create_state(void)
 {
     struct vulkan_state *state = malloc(sizeof(*state));
     assert(state);
@@ -104,13 +128,19 @@ static struct vulkan_state* initialize_vulkan(void)
         VK_MAKE_VERSION(1, 0, 0)
     };
 
+    dump_available_layers();
+
+    const char* validation_layers[] = {
+        "VK_LAYER_LUNARG_standard_validation",
+    };
+
     struct VkInstanceCreateInfo info = {
         VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         NULL,
         0,
         &app_info,
-        0,
-        NULL,
+        sizeof(validation_layers) / sizeof(*validation_layers),
+        validation_layers,
         0,
         NULL
     };
@@ -248,11 +278,8 @@ static struct gpu_memory allocate_buffer(struct vulkan_state *state, uint64_t si
     CALL_VK(vkBindBufferMemory, (state->device, vk_buffer, vk_memory, vk_size));
 
 
-    void *data;
-    CALL_VK(vkMapMemory, (state->device, vk_memory, 0, vk_size, 0, &data));
-
     struct gpu_memory info = {
-        data,
+        NULL,
         vk_size,
         vk_memory,
         vk_buffer,
@@ -505,17 +532,43 @@ static void execute_sum_kernel(struct vulkan_state *state)
     vkDestroyFence(state->device, fence, NULL);
 }
 
+static void destroy_state(struct vulkan_state **state)
+{
+    assert(state && *state);
+    struct vulkan_state *st = *state;
+
+#define FREE_VK(Field, Function)                \
+    if (st->Field != VK_NULL_HANDLE)            \
+        Function(st->device, st->Field, NULL)
+
+    FREE_VK(shader_module, vkDestroyShaderModule);
+    FREE_VK(descriptor_pool, vkDestroyDescriptorPool);
+    FREE_VK(descriptor_layout, vkDestroyDescriptorSetLayout);
+    FREE_VK(pipeline_layout, vkDestroyPipelineLayout);
+    FREE_VK(pipeline, vkDestroyPipeline);
+    FREE_VK(command_pool, vkDestroyCommandPool);
+
+    if (st->device != VK_NULL_HANDLE)
+        vkDestroyDevice(st->device, NULL);
+    if (st->instance != VK_NULL_HANDLE)
+        vkDestroyInstance(st->instance, NULL);
+
+    free(st);
+    *state = NULL;
+}
+
 int main()
 {
     struct vulkan_state *state = NULL;
     struct gpu_memory buffers[BUFFER_COUNT];
+    size_t shader_length;
+    uint32_t *shader_code;
 
-    state = initialize_vulkan();
+    state = create_state();
     initialize_device(state);
 
     descriptor_pool_create(state, BUFFER_COUNT);
     command_pool_create(state);
-
     descriptor_set_layouts_create(state, BUFFER_COUNT);
     descriptor_set_create(state);
 
@@ -524,23 +577,41 @@ int main()
         descriptor_set_bind(state, &buffers[i], i);
     }
 
-    size_t shader_length;
-    uint32_t *shader = load_shader(SHADER_PATH, &shader_length);
-    printf("shader loaded (%zu bytes)\n", shader_length);
+    shader_code = load_shader(SHADER_PATH, &shader_length);
+    create_pipeline(state, shader_code, shader_length);
 
-    create_pipeline(state, shader, shader_length);
+    int *array = NULL;
+    CALL_VK(vkMapMemory,
+            (state->device,
+             buffers[0].vk_memory, 0, buffers[0].vk_size, 0, (void**)&array));
+
+    for (int i = 0; i < ELT_COUNT; i++)
+        array[i] = i;
+
+    vkUnmapMemory(state->device, buffers[0].vk_memory);
+    array = NULL;
 
     execute_sum_kernel(state);
 
-    /* Cleanup */
-    for (uint32_t i = 0; i < BUFFER_COUNT; i++) {
-        free_buffer(state, &buffers[i]);
+    CALL_VK(vkMapMemory,
+            (state->device,
+             buffers[1].vk_memory, 0, buffers[1].vk_size, 0, (void**)&array));
+
+    for (int i = 0; i < ELT_COUNT; i++) {
+        printf("%d -> %d\n", i, array[i]);
+        assert(array[i] == i + i);
     }
 
-    free(shader);
-    vkDestroyShaderModule(state->device, state->shader_module, NULL);
-    vkDestroyDevice(state->device, NULL);
-    vkDestroyInstance(state->instance, NULL);
+    vkUnmapMemory(state->device, buffers[1].vk_memory);
+    array = NULL;
+
+
+
+    /* Cleanup */
+    for (uint32_t i = 0; i < BUFFER_COUNT; i++)
+        free_buffer(state, &buffers[i]);
+    destroy_state(&state);
+    free(shader_code);
 
     return 0;
 }
