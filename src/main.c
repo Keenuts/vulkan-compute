@@ -7,7 +7,9 @@ struct vulkan_state {
     VkInstance instance;
     VkPhysicalDevice phys_device;
     VkDevice device;
-    VkDescriptorSetLayout layout_desc;
+    VkDescriptorSetLayout descriptor_layout;
+    VkDescriptorPool      descriptor_pool;
+    VkDescriptorSet       descriptor_set;
 };
 
 struct gpu_memory {
@@ -252,55 +254,115 @@ static void free_buffer(struct vulkan_state *state, struct gpu_memory *mem)
     vkDestroyBuffer(state->device, mem->vk_buffer, NULL);
 }
 
-static void create_descriptor_sets(struct vulkan_state *state)
+static void descriptor_set_layouts_create(struct vulkan_state *state, uint32_t count)
 {
-    VkDescriptorSetLayoutBinding binding_input = {
-        0,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        1,
-        VK_SHADER_STAGE_COMPUTE_BIT,
-        NULL
-    };
+    VkDescriptorSetLayoutBinding *bindings = malloc(sizeof(*bindings) * count);
+    assert(bindings);
 
-    VkDescriptorSetLayoutBinding binding_output = {
-        0,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        1,
-        VK_SHADER_STAGE_COMPUTE_BIT,
-        NULL
-    };
-    VkDescriptorSetLayoutBinding bindings[2] = { binding_input, binding_output };
+    for (uint32_t i = 0; i < count; i++) {
+        bindings[i].binding = i;
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        bindings[i].pImmutableSamplers = NULL;
+    }
 
     VkDescriptorSetLayoutCreateInfo info = {
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         NULL,
         0,
-        1,
+        count,
         bindings
     };
 
     CALL_VK(vkCreateDescriptorSetLayout,
-            (state->device, &info, NULL, &state->layout_desc));
+            (state->device, &info, NULL, &state->descriptor_layout));
 }
+
+static void descriptor_pool_create(struct vulkan_state *state, uint32_t size)
+{
+    VkDescriptorPoolSize pool_size = {
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        size
+    };
+
+    VkDescriptorPoolCreateInfo info = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        NULL,
+        0 /* no flags */,
+        size,
+        1,
+        &pool_size
+    };
+
+    CALL_VK(vkCreateDescriptorPool,
+            (state->device, &info, NULL, &state->descriptor_pool));
+}
+
+static void descriptor_set_create(struct vulkan_state *state)
+{
+    VkDescriptorSetAllocateInfo alloc_info = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        NULL,
+        state->descriptor_pool,
+        1,
+        &state->descriptor_layout
+    };
+
+    CALL_VK(vkAllocateDescriptorSets,
+            (state->device, &alloc_info, &state->descriptor_set));
+}
+
+static void descriptor_set_bind(struct vulkan_state *state,
+                              struct gpu_memory *buffer,
+                              uint32_t binding)
+{
+    VkDescriptorBufferInfo buffer_info = {
+        buffer->vk_buffer,
+        0,
+        buffer->vk_size,
+    };
+
+    VkWriteDescriptorSet write_info = {
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        NULL,
+        state->descriptor_set,
+        binding,
+        0,
+        1,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        NULL,
+        &buffer_info,
+        NULL
+    };
+
+    vkUpdateDescriptorSets(state->device, 1, &write_info, 0, NULL);
+}
+
+#define BUFFER_COUNT 2
+#define SHADER_PATH "./sum.spv"
 
 int main()
 {
-    const int ELT_COUNT = 1000;
-
     struct vulkan_state *state = NULL;
-    int *input_data = NULL;
-    struct gpu_memory input_memory, output_memory;
+    struct gpu_memory buffers[BUFFER_COUNT];
 
     state = initialize_vulkan();
     initialize_device(state);
 
-    input_memory  = allocate_buffer(state, sizeof(*input_data) * ELT_COUNT);
-    output_memory = allocate_buffer(state, sizeof(*input_data) * ELT_COUNT);
+    descriptor_pool_create(state, BUFFER_COUNT);
+    descriptor_set_layouts_create(state, BUFFER_COUNT);
+    descriptor_set_create(state);
 
-    free_buffer(state, &input_memory);
-    free_buffer(state, &output_memory);
+    for (uint32_t i = 0; i < BUFFER_COUNT; i++) {
+        buffers[i] = allocate_buffer(state, sizeof(buffers[i]) * ELT_COUNT);
+        descriptor_set_bind(state, &buffers[i], i);
+    }
 
-    create_descriptor_sets(state);
+    /* Cleanup */
+    for (uint32_t i = 0; i < BUFFER_COUNT; i++) {
+        free_buffer(state, &buffers[i]);
+    }
 
     vkDestroyDevice(state->device, NULL);
     vkDestroyInstance(state->instance, NULL);
