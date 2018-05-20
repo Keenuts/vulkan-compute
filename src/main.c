@@ -15,8 +15,12 @@ struct vulkan_state {
     VkInstance              instance;
     VkPhysicalDevice        phys_device;
     VkDevice                device;
-    VkDescriptorSetLayout   descriptor_layout;
+    uint32_t                queue_family_index;
+
     VkDescriptorPool        descriptor_pool;
+    VkCommandPool           command_pool;
+
+    VkDescriptorSetLayout   descriptor_layout;
     VkDescriptorSet         descriptor_set;
     VkPipeline              pipeline;
 };
@@ -164,6 +168,7 @@ static VkDeviceQueueCreateInfo find_queue(struct vulkan_state *state)
         priorities
     };
 
+    state->queue_family_index = compute_queue_index;
     return queue_info;
 }
 
@@ -308,6 +313,19 @@ static void descriptor_pool_create(struct vulkan_state *state, uint32_t size)
             (state->device, &info, NULL, &state->descriptor_pool));
 }
 
+static void command_pool_create(struct vulkan_state *state)
+{
+    VkCommandPoolCreateInfo pool_info = {
+        VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        NULL,
+        0,
+        state->queue_family_index
+    };
+
+    CALL_VK(vkCreateCommandPool,
+            (state->device, &pool_info, NULL, &state->command_pool));
+}
+
 static void descriptor_set_create(struct vulkan_state *state)
 {
     VkDescriptorSetAllocateInfo alloc_info = {
@@ -432,6 +450,8 @@ int main()
     initialize_device(state);
 
     descriptor_pool_create(state, BUFFER_COUNT);
+    command_pool_create(state);
+
     descriptor_set_layouts_create(state, BUFFER_COUNT);
     descriptor_set_create(state);
 
