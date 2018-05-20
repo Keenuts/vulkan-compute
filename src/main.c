@@ -77,17 +77,18 @@ static const char* vkresult_to_string(VkResult res)
     }
 }
 
-static void check_vkresult(VkResult res)
+static void check_vkresult(const char* fname, VkResult res)
 {
     if (res == VK_SUCCESS) {
+        fprintf(stderr, "\033[32m%s\033[0m\n", fname);
         return;
     }
 
-    fprintf(stderr, "error: %s\n", vkresult_to_string(res));
+    fprintf(stderr, "\033[31m%s = %s\033[0m\n", fname, vkresult_to_string(res));
     assert(0);
 }
 
-#define CALL_VK(Func, Param) check_vkresult(Func Param)
+#define CALL_VK(Func, Param) check_vkresult(#Func, Func Param)
 
 static void dump_available_layers(void)
 {
@@ -230,6 +231,10 @@ static void initialize_device(struct vulkan_state *state)
 {
     select_physical_device(state);
     create_logical_device(state);
+    descriptor_pool_create(state, BUFFER_COUNT);
+    command_pool_create(state);
+    descriptor_set_layouts_create(state, BUFFER_COUNT);
+    descriptor_set_create(state);
 }
 
 static struct gpu_memory allocate_buffer(struct vulkan_state *state, uint64_t size)
@@ -567,13 +572,9 @@ int main()
     state = create_state();
     initialize_device(state);
 
-    descriptor_pool_create(state, BUFFER_COUNT);
-    command_pool_create(state);
-    descriptor_set_layouts_create(state, BUFFER_COUNT);
-    descriptor_set_create(state);
-
+    /* Creating buffers */
     for (uint32_t i = 0; i < BUFFER_COUNT; i++) {
-        buffers[i] = allocate_buffer(state, sizeof(buffers[i]) * ELT_COUNT);
+        buffers[i] = allocate_buffer(state, sizeof(*buffers) * ELT_COUNT);
         descriptor_set_bind(state, &buffers[i], i);
     }
 
