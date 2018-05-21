@@ -5,7 +5,7 @@ set(SOURCES
 
 add_custom_command(
     OUTPUT sum.spv
-    COMMAND glslangValidator
+    COMMAND ${GLSLANG}
         -V ${CMAKE_CURRENT_SOURCE_DIR}/sum.comp
         -o ${CMAKE_BINARY_DIR}/sum.spv
         -DELT_COUNT=${ELT_COUNT}
