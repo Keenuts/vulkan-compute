@@ -424,20 +424,34 @@ static void free_buffer(struct vulkan_state *state, struct gpu_memory *mem)
 static uint32_t* load_shader(const char *path, size_t *file_length)
 {
     assert(file_length);
+    uint32_t *content = NULL;
 
     int fd = open(path, O_RDONLY);
-    assert(fd >= 0);
+    if (fd < 0)
+        return NULL;
 
-    size_t size = lseek(fd, 0, SEEK_END);
-    assert(size != (size_t)-1);
-    lseek(fd, 0, SEEK_SET);
+    do {
+        size_t size = lseek(fd, 0, SEEK_END);
+        lseek(fd, 0, SEEK_SET);
+        if (size == (size_t)-1) {
+            break;
+        }
 
-    uint32_t *content = malloc(size);
-    assert(content);
-    assert(read(fd, content, size) >= 0);
+        content = malloc(size);
+        if (content == NULL) {
+            break;
+        }
+
+        if (read(fd, content, size) < 0) {
+            free(content);
+            content = NULL;
+            break;
+        }
+
+        *file_length = size;
+    } while (0);
+
     close(fd);
-
-    *file_length = size;
     return content;
 }
 
