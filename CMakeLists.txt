@@ -50,8 +50,12 @@ if (NOT GLSLANG)
     message(FATAL_ERROR "GlslangValidator is missing.")
 endif()
 
-link_libraries(vulkan)
 
-
+if (DEFINED ICD_LIB)
+    message("linking with a custom icd")
+    link_libraries(${ICD_LIB})
+else ()
+    link_libraries(Vulkan)
+endif()
 
 add_subdirectory(src)
