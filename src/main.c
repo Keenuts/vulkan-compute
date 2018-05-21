@@ -160,11 +160,14 @@ static void select_physical_device(struct vulkan_state *state)
     assert(device_count > 0);
 
     devices = malloc(sizeof(*devices) * device_count);
-    assert(devices);
+    if (devices == NULL)
+        exit(1);
 
     CALL_VK(vkEnumeratePhysicalDevices, (state->instance, &device_count, devices));
 
     state->phys_device = devices[0];
+
+    free(devices);
 }
 
 static VkDeviceQueueCreateInfo find_queue(struct vulkan_state *state)
@@ -203,6 +206,7 @@ static VkDeviceQueueCreateInfo find_queue(struct vulkan_state *state)
     };
 
     state->queue_family_index = compute_queue_index;
+    free(properties);
     return queue_info;
 }
 
@@ -250,6 +254,7 @@ static void descriptor_set_layouts_create(struct vulkan_state *state, uint32_t c
 
     CALL_VK(vkCreateDescriptorSetLayout,
             (state->device, &info, NULL, &state->descriptor_layout));
+    free(bindings);
 }
 
 static void descriptor_pool_create(struct vulkan_state *state, uint32_t size)
@@ -684,16 +689,25 @@ int main()
     uint32_t *shader_code;
 
     state = create_state();
+    if (state == NULL)
+        return 1;
+
     initialize_device(state);
+
     shader_code = load_shader(SHADER_PATH, &shader_length);
+    if (shader_code == NULL) {
+        destroy_state(&state);
+        return 2;
+    }
+
     create_pipeline(state, shader_code, shader_length);
 
     do_sum_one_buffer_one_memory(state);
     do_sum_two_buffer_one_memory(state);
     do_sum_two_buffer_two_memory(state);
 
-    destroy_state(&state);
     free(shader_code);
+    destroy_state(&state);
 
     return 0;
 }
