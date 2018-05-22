@@ -710,6 +710,7 @@ int main()
 
     shader_code = load_shader(SHADER_PATH, &shader_length);
     if (shader_code == NULL) {
+        fprintf(stderr, "unable to load the shader.\n");
         destroy_state(&state);
         return 2;
     }
