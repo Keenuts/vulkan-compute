@@ -11,7 +11,7 @@ set(WORKGROUP_SIZE 32)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 
-set(CMAKE_C_FLAGS "\
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}\
     -DELT_COUNT=${ELT_COUNT}\
     -DWORKGROUP_SIZE=${WORKGROUP_SIZE}"
 )
@@ -28,9 +28,9 @@ set(CMAKE_C_FLAGS_DEBUG "\
 )
 
 set(CMAKE_C_FLAGS_RELEASE "\
-    -O0 -g\
-    -DNDEBUG\
-    "
+    ${CMAKE_C_FLAGS_RELEASE}\
+    -O0\
+    -g"
 )
 
 if (DEBUG)
@@ -40,8 +40,6 @@ else()
     message("build-type: release")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_RELEASE}")
 endif()
-
-message(${CMAKE_C_FLAGS})
 
 # dependencies
 
