@@ -1,14 +1,16 @@
 #include <assert.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <vulkan/vulkan.h>
 
 #define BUFFER_COUNT 2
-#define SHADER_PATH "./sum.spv"
+#define SHADER_NAME "sum.spv"
 #define SHADER_ENTRY_POINT "main"
 
 struct vulkan_state {
@@ -696,11 +698,14 @@ static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
     free_buffer(state, &b);
 }
 
-int main()
+int main(int argc, char **argv)
 {
+    if (argc <= 0)
+        return 1;
+
     struct vulkan_state *state = NULL;
+    uint32_t *shader_code = NULL;
     size_t shader_length;
-    uint32_t *shader_code;
 
     state = create_state();
     if (state == NULL)
@@ -708,7 +713,17 @@ int main()
 
     initialize_device(state);
 
-    shader_code = load_shader(SHADER_PATH, &shader_length);
+    char *path = dirname(strdup(argv[0]));
+    size_t pathlen = strlen(path) + strlen(SHADER_NAME) + 2;
+    path = realloc(path, pathlen);
+    strcat(path, "/" SHADER_NAME);
+
+    shader_code = load_shader(path, &shader_length);
+    printf("path: %s\n", path);
+    free(path);
+    path = NULL;
+
+
     if (shader_code == NULL) {
         fprintf(stderr, "unable to load the shader.\n");
         destroy_state(&state);
