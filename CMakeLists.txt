@@ -53,7 +53,7 @@ if (DEFINED ICD_LIB)
     message("linking with a custom icd")
     link_libraries(${ICD_LIB})
 else ()
-    link_libraries(Vulkan)
+    link_libraries(vulkan)
 endif()
 
 if (DEFINED VIRGL_LIB)
