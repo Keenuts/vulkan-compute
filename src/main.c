@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <libgen.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +13,9 @@
 #define BUFFER_COUNT 2
 #define SHADER_NAME "sum.spv"
 #define SHADER_ENTRY_POINT "main"
+#define REDHAT_VENDOR_ID 0x1af4
+#define VIRTIOGPU_DEVICE_ID 0x1012
+#define VIRTIO_VAR_NAME "USE_VIRTIOGPU"
 
 struct vulkan_state {
     VkInstance              instance;
@@ -159,7 +163,9 @@ static void select_physical_device(struct vulkan_state *state)
     VkPhysicalDevice *devices = NULL;
 
     CALL_VK(vkEnumeratePhysicalDevices, (state->instance, &device_count, NULL));
-    assert(device_count > 0);
+    if (device_count <= 0) {
+        abort();
+    }
 
     devices = malloc(sizeof(*devices) * device_count);
     if (devices == NULL)
@@ -167,8 +173,38 @@ static void select_physical_device(struct vulkan_state *state)
 
     CALL_VK(vkEnumeratePhysicalDevices, (state->instance, &device_count, devices));
 
-    state->phys_device = devices[0];
+    uint32_t device_index = UINT_MAX;
 
+    printf("Available devices\n");
+    for (uint32_t i = 0; i < device_count; i++) {
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(devices[i], &props);
+
+        printf("\t[%u] - %s (v:0x%x, d:0x%x)\n",
+            i, props.deviceName, props.vendorID, props.deviceID);
+
+        if (props.vendorID != REDHAT_VENDOR_ID) {
+            continue;
+        }
+
+        if (props.deviceID != VIRTIOGPU_DEVICE_ID) {
+            continue;
+        }
+
+        device_index = i;
+    }
+
+    if (!getenv(VIRTIO_VAR_NAME)) {
+        device_index = 0;
+    }
+
+    if (device_index == UINT_MAX) {
+        fprintf(stderr, "Unable to find any virtio-gpu device. Aborting now.\n");
+        abort();
+    }
+
+    printf("loading device id=%u\n", device_index);
+    state->phys_device = devices[device_index];
     free(devices);
 }
 
