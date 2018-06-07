@@ -175,7 +175,7 @@ static void select_physical_device(struct vulkan_state *state)
 
     uint32_t device_index = UINT_MAX;
 
-    printf("Available devices\n");
+    printf("%d available devices\n", device_count);
     for (uint32_t i = 0; i < device_count; i++) {
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(devices[i], &props);
@@ -195,6 +195,7 @@ static void select_physical_device(struct vulkan_state *state)
     }
 
     if (!getenv(VIRTIO_VAR_NAME)) {
+        fprintf(stderr, "the application will allow non-virtiogpu devices.\n");
         device_index = 0;
     }
 
