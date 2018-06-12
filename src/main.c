@@ -390,13 +390,16 @@ static VkDeviceMemory allocate_gpu_memory(struct vulkan_state *state, VkDeviceSi
     for (uint32_t i = 0; i < props.memoryTypeCount; i++) {
         VkMemoryType type = props.memoryTypes[i];
 
-        if (type.propertyFlags | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT &&
-            type.propertyFlags | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) {
+        if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT &&
+            type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) {
             memory_index = i;
             break;
         }
     }
-    assert(memory_index < UINT32_MAX);
+    if (memory_index == UINT32_MAX) {
+        fprintf(stderr, "Compatible memory not found (HOST_VISIBLE & HOST_COHERENT).\n");
+        abort();
+    }
 
     VkMemoryAllocateInfo alloc_info = {
         VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -650,6 +653,7 @@ static void check_payload(int *buffer)
         if (buffer[i] != i + i) {
             fprintf(stderr, "invalid value for [%d]. got %d, expected %d\n",
                     i, buffer[i], i + i);
+            return;
         }
         assert(buffer[i] == i + i);
     }
