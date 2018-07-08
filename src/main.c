@@ -32,6 +32,7 @@ struct vulkan_state {
     VkPipelineLayout        pipeline_layout;
     VkPipeline              pipeline;
     VkShaderModule          shader_module;
+    uint8_t                 memory_is_cached;
 };
 
 struct gpu_memory {
@@ -123,7 +124,10 @@ static void dump_available_layers(void)
 static struct vulkan_state* create_state(void)
 {
     struct vulkan_state *state = malloc(sizeof(*state));
-    assert(state);
+    if (NULL == state) {
+        abort();
+    }
+    memset(state, 0, sizeof(*state));
 
     struct VkApplicationInfo app_info = {
         VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -215,10 +219,14 @@ static VkDeviceQueueCreateInfo find_queue(struct vulkan_state *state)
     VkQueueFamilyProperties *properties;
 
     vkGetPhysicalDeviceQueueFamilyProperties(state->phys_device, &count, NULL);
-    assert(count > 0);
+    if (count <= 0) {
+        abort();
+    }
 
     properties = malloc(sizeof(*properties) * count);
-    assert(properties);
+    if (NULL == properties) {
+        abort();
+    }
 
     vkGetPhysicalDeviceQueueFamilyProperties(state->phys_device, &count, properties);
 
@@ -390,14 +398,18 @@ static VkDeviceMemory allocate_gpu_memory(struct vulkan_state *state, VkDeviceSi
     for (uint32_t i = 0; i < props.memoryTypeCount; i++) {
         VkMemoryType type = props.memoryTypes[i];
 
-        if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT &&
-            type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) {
+        if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+            if (0 == (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+                state->memory_is_cached = 1;
+            }
+
             memory_index = i;
             break;
         }
     }
+
     if (memory_index == UINT32_MAX) {
-        fprintf(stderr, "Compatible memory not found (HOST_VISIBLE & HOST_COHERENT).\n");
+        fprintf(stderr, "Compatible memory not found (HOST_VISIBLE).\n");
         abort();
     }
 
@@ -668,17 +680,33 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
     descriptor_set_bind(state, a.vk_buffer, a.vk_size, 0);
     descriptor_set_bind(state, a.vk_buffer, a.vk_size, 1);
 
+    VkMappedMemoryRange range = {
+        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+        NULL,
+        a.vk_memory,
+        0,
+        a.vk_size
+    };
+
     CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
+
     generate_payload(ptr);
-    vkUnmapMemory(state->device, a.vk_memory);
+
+    if (state->memory_is_cached) {
+        CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &range));
+    }
 
     execute_sum_kernel(state);
 
-    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
+    if (state->memory_is_cached) {
+        CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &range));
+    }
+
     check_payload(ptr);
     vkUnmapMemory(state->device, a.vk_memory);
 
     free_buffer(state, &a);
+    printf("%s executed\n", __func__);
 }
 
 static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
@@ -692,6 +720,23 @@ static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
     buffer_a = create_gpu_buffer(state, size);
     buffer_b = create_gpu_buffer(state, size);
 
+    VkMappedMemoryRange write_range = {
+        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+        NULL,
+        memory,
+        0,
+        size
+    };
+
+    VkMappedMemoryRange read_range = {
+        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+        NULL,
+        memory,
+        size,
+        size
+    };
+
+
     CALL_VK(vkBindBufferMemory, (state->device, buffer_a, memory, 0));
     CALL_VK(vkBindBufferMemory, (state->device, buffer_b, memory, size));
 
@@ -699,19 +744,28 @@ static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
     descriptor_set_bind(state, buffer_b, size, 1);
 
     CALL_VK(vkMapMemory, (state->device, memory,    0, size, 0, &ptr_a));
+    CALL_VK(vkMapMemory, (state->device, memory, size, size, 0, &ptr_b));
+
     generate_payload(ptr_a);
-    vkUnmapMemory(state->device, memory);
+    if (state->memory_is_cached) {
+        CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &write_range));
+    }
 
     execute_sum_kernel(state);
 
-    CALL_VK(vkMapMemory, (state->device, memory, size, size, 0, &ptr_b));
+    if (state->memory_is_cached) {
+        CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
+    }
     check_payload(ptr_b);
+
+    vkUnmapMemory(state->device, memory);
     vkUnmapMemory(state->device, memory);
 
 
     vkDestroyBuffer(state->device, buffer_a, NULL);
     vkDestroyBuffer(state->device, buffer_b, NULL);
     vkFreeMemory(state->device, memory, NULL);
+    printf("%s executed\n", __func__);
 }
 
 static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
@@ -725,11 +779,35 @@ static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
     b = allocate_buffer(state, sizeof(int) * ELT_COUNT);
     descriptor_set_bind(state, b.vk_buffer, b.vk_size, 1);
 
+    VkMappedMemoryRange write_range = {
+        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+        NULL,
+        a.vk_memory,
+        0,
+        a.vk_size
+    };
+
+    VkMappedMemoryRange read_range = {
+        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+        NULL,
+        b.vk_memory,
+        0,
+        b.vk_size
+    };
+
     CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr_a));
     CALL_VK(vkMapMemory, (state->device, b.vk_memory, 0, b.vk_size, 0, &ptr_b));
 
     generate_payload(ptr_a);
+    if (state->memory_is_cached) {
+        CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &write_range));
+    }
+
     execute_sum_kernel(state);
+
+    if (state->memory_is_cached) {
+        CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
+    }
     check_payload(ptr_b);
 
     vkUnmapMemory(state->device, a.vk_memory);
@@ -737,6 +815,7 @@ static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
 
     free_buffer(state, &a);
     free_buffer(state, &b);
+    printf("%s executed\n", __func__);
 }
 
 int main(int argc, char **argv)
@@ -780,5 +859,6 @@ int main(int argc, char **argv)
     free(shader_code);
     destroy_state(&state);
 
+    puts("bye bye");
     return 0;
 }
