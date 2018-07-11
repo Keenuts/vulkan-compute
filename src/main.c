@@ -667,23 +667,66 @@ static void destroy_state(struct vulkan_state **state)
 
 /* Application logic */
 
-static void generate_payload(int *buffer)
+static void generate_payload(int *buffer, int elt_count)
 {
-    for (int i = 0; i < ELT_COUNT; i++) {
+    for (int i = 0; i < elt_count; i++) {
         buffer[i] = i;
     }
 }
 
-static void check_payload(int *buffer)
+static void check_payload(int *buffer, int elt_count)
 {
-    for (int i = 0; i < ELT_COUNT; i++) {
+    for (int i = 0; i < elt_count; i++) {
         if (buffer[i] != i + i) {
             fprintf(stderr, "invalid value for [%d]. got %d, expected %d\n",
                     i, buffer[i], i + i);
-            return;
+            abort();
         }
-        assert(buffer[i] == i + i);
     }
+}
+
+static void check_memory_upload(struct vulkan_state *state)
+{
+    struct gpu_memory a;
+    void *ptr = NULL;
+    VkMappedMemoryRange range;
+    const size_t size = ELT_COUNT * sizeof(int);
+    void *local = NULL;
+
+    local = malloc(size);
+    generate_payload(local, ELT_COUNT);
+
+    a = allocate_buffer(state, size);
+    memset(&range, 0, sizeof(range));
+    range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    range.memory = a.vk_memory;
+    range.size = a.vk_size;
+
+    /* writting and unmapping */
+    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
+
+    memcpy(ptr, local, size);
+
+    if (state->memory_is_cached) {
+        CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &range));
+    }
+
+    vkUnmapMemory(state->device, a.vk_memory);
+
+
+    /* remapping and reading back */
+    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
+    if (state->memory_is_cached) {
+        CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &range));
+    }
+
+    if (0 != memcmp(ptr, local, size)) {
+        fprintf(stderr, "identity check failed\n");
+        abort();
+    }
+
+    vkUnmapMemory(state->device, a.vk_memory);
+    printf("identity check passed\n");
 }
 
 static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
@@ -705,7 +748,7 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
 
     CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
 
-    generate_payload(ptr);
+    generate_payload(ptr, ELT_COUNT);
 
     if (state->memory_is_cached) {
         CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &range));
@@ -717,7 +760,7 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
         CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &range));
     }
 
-    check_payload(ptr);
+    check_payload(ptr, ELT_COUNT);
     vkUnmapMemory(state->device, a.vk_memory);
 
     free_buffer(state, &a);
@@ -761,7 +804,7 @@ static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
     CALL_VK(vkMapMemory, (state->device, memory,    0, size, 0, &ptr_a));
     CALL_VK(vkMapMemory, (state->device, memory, size, size, 0, &ptr_b));
 
-    generate_payload(ptr_a);
+    generate_payload(ptr_a, ELT_COUNT);
     if (state->memory_is_cached) {
         CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &write_range));
     }
@@ -771,7 +814,7 @@ static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
     if (state->memory_is_cached) {
         CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
     }
-    check_payload(ptr_b);
+    check_payload(ptr_b, ELT_COUNT);
 
     vkUnmapMemory(state->device, memory);
     vkUnmapMemory(state->device, memory);
@@ -813,7 +856,7 @@ static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
     CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr_a));
     CALL_VK(vkMapMemory, (state->device, b.vk_memory, 0, b.vk_size, 0, &ptr_b));
 
-    generate_payload(ptr_a);
+    generate_payload(ptr_a, ELT_COUNT);
     if (state->memory_is_cached) {
         CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &write_range));
     }
@@ -823,7 +866,7 @@ static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
     if (state->memory_is_cached) {
         CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
     }
-    check_payload(ptr_b);
+    check_payload(ptr_b, ELT_COUNT);
 
     vkUnmapMemory(state->device, a.vk_memory);
     vkUnmapMemory(state->device, b.vk_memory);
@@ -867,6 +910,7 @@ int main(int argc, char **argv)
 
     create_pipeline(state, shader_code, shader_length);
 
+    check_memory_upload(state);
     do_sum_one_buffer_one_memory(state);
     do_sum_two_buffer_one_memory(state);
     do_sum_two_buffer_two_memory(state);
