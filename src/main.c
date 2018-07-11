@@ -398,6 +398,21 @@ static VkDeviceMemory allocate_gpu_memory(struct vulkan_state *state, VkDeviceSi
     for (uint32_t i = 0; i < props.memoryTypeCount; i++) {
         VkMemoryType type = props.memoryTypes[i];
 
+        printf("Memory[%d]:\n", i);
+        if (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT & type.propertyFlags)
+            printf("\tVK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT\n");
+        if (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT & type.propertyFlags)
+            printf("\tVK_MEMORY_PROPERTY_HOST_VISIBLE_BIT\n");
+        if (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT & type.propertyFlags)
+            printf("\tVK_MEMORY_PROPERTY_HOST_COHERENT_BIT\n");
+        if (VK_MEMORY_PROPERTY_HOST_CACHED_BIT & type.propertyFlags)
+            printf("\tVK_MEMORY_PROPERTY_HOST_CACHED_BIT\n");
+        if (VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT & type.propertyFlags)
+            printf("\tVK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT\n");
+        if (VK_MEMORY_PROPERTY_PROTECTED_BIT & type.propertyFlags)
+            printf("\tVK_MEMORY_PROPERTY_PROTECTED_BIT\n");
+
+
         if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
             if (0 == (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
                 state->memory_is_cached = 1;
