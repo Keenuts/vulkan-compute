@@ -726,7 +726,7 @@ static void check_memory_upload(struct vulkan_state *state)
     }
 
     vkUnmapMemory(state->device, a.vk_memory);
-    printf("identity check passed\n");
+    printf("\033[36m%s executed\033[0m\n", __func__);
 }
 
 static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
@@ -764,7 +764,7 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
     vkUnmapMemory(state->device, a.vk_memory);
 
     free_buffer(state, &a);
-    printf("%s executed\n", __func__);
+    printf("\033[36m%s executed\033[0m\n", __func__);
 }
 
 static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
@@ -823,7 +823,7 @@ static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
     vkDestroyBuffer(state->device, buffer_a, NULL);
     vkDestroyBuffer(state->device, buffer_b, NULL);
     vkFreeMemory(state->device, memory, NULL);
-    printf("%s executed\n", __func__);
+    printf("\033[36m%s executed\033[0m\n", __func__);
 }
 
 static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
@@ -873,7 +873,7 @@ static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
 
     free_buffer(state, &a);
     free_buffer(state, &b);
-    printf("%s executed\n", __func__);
+    printf("\033[36m%s executed\033[0m\n", __func__);
 }
 
 int main(int argc, char **argv)
