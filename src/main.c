@@ -761,10 +761,10 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
     }
 
     check_payload(ptr, ELT_COUNT);
-    vkUnmapMemory(state->device, a.vk_memory);
-
-    free_buffer(state, &a);
     printf("\033[36m%s executed\033[0m\n", __func__);
+
+    vkUnmapMemory(state->device, a.vk_memory);
+    free_buffer(state, &a);
 }
 
 static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
@@ -814,16 +814,15 @@ static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
     if (state->memory_is_cached) {
         CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
     }
+
     check_payload(ptr_b, ELT_COUNT);
+    printf("\033[36m%s executed\033[0m\n", __func__);
 
     vkUnmapMemory(state->device, memory);
     vkUnmapMemory(state->device, memory);
-
-
     vkDestroyBuffer(state->device, buffer_a, NULL);
     vkDestroyBuffer(state->device, buffer_b, NULL);
     vkFreeMemory(state->device, memory, NULL);
-    printf("\033[36m%s executed\033[0m\n", __func__);
 }
 
 static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
@@ -866,14 +865,14 @@ static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
     if (state->memory_is_cached) {
         CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
     }
+
     check_payload(ptr_b, ELT_COUNT);
+    printf("\033[36m%s executed\033[0m\n", __func__);
 
     vkUnmapMemory(state->device, a.vk_memory);
     vkUnmapMemory(state->device, b.vk_memory);
-
     free_buffer(state, &a);
     free_buffer(state, &b);
-    printf("\033[36m%s executed\033[0m\n", __func__);
 }
 
 int main(int argc, char **argv)
