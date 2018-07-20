@@ -460,17 +460,18 @@ static VkBuffer create_gpu_buffer(struct vulkan_state *state, VkDeviceSize size)
     return vk_buffer;
 }
 
-static struct gpu_memory allocate_buffer(struct vulkan_state *state, uint64_t size)
+static struct gpu_memory allocate_buffer(struct vulkan_state *state,
+                                         VkDeviceSize offset,
+                                         VkDeviceSize size)
 {
-    VkDeviceSize vk_size = size;
-    VkDeviceMemory vk_memory = allocate_gpu_memory(state, vk_size);
-    VkBuffer vk_buffer = create_gpu_buffer(state, vk_size);
+    VkDeviceMemory vk_memory = allocate_gpu_memory(state, size);
+    VkBuffer vk_buffer = create_gpu_buffer(state, size);
 
-    CALL_VK(vkBindBufferMemory, (state->device, vk_buffer, vk_memory, 0));
+    CALL_VK(vkBindBufferMemory, (state->device, vk_buffer, vk_memory, offset));
 
     struct gpu_memory info = {
         NULL,
-        vk_size,
+        size,
         vk_memory,
         vk_buffer,
     };
@@ -696,7 +697,7 @@ static void check_memory_upload(struct vulkan_state *state)
     local = malloc(size);
     generate_payload(local, ELT_COUNT);
 
-    a = allocate_buffer(state, size);
+    a = allocate_buffer(state, 0, size);
     memset(&range, 0, sizeof(range));
     range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
     range.memory = a.vk_memory;
@@ -736,7 +737,7 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
     struct gpu_memory a;
     void *ptr;
 
-    a = allocate_buffer(state, sizeof(int) * ELT_COUNT);
+    a = allocate_buffer(state, 0, sizeof(int) * ELT_COUNT);
     descriptor_set_bind(state, a.vk_buffer, a.vk_size, 0);
     descriptor_set_bind(state, a.vk_buffer, a.vk_size, 1);
 
@@ -771,60 +772,54 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
 
 static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
 {
-    VkDeviceMemory memory;
     VkBuffer buffer_a, buffer_b;
-    void *ptr_a, *ptr_b;
-    VkDeviceSize size = ELT_COUNT * sizeof(int);
+    VkDeviceMemory vk_memory;
+    VkMappedMemoryRange write_range, read_range;
+    const VkDeviceSize size = ELT_COUNT * sizeof(int);
+    void *ptr = NULL;
 
-    memory = allocate_gpu_memory(state, size * 2);
+    vk_memory = allocate_gpu_memory(state, size * 2);
     buffer_a = create_gpu_buffer(state, size);
     buffer_b = create_gpu_buffer(state, size);
 
-    VkMappedMemoryRange write_range = {
-        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-        NULL,
-        memory,
-        0,
-        size
-    };
-
-    VkMappedMemoryRange read_range = {
-        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-        NULL,
-        memory,
-        size,
-        size
-    };
-
-
-    CALL_VK(vkBindBufferMemory, (state->device, buffer_a, memory, 0));
-    CALL_VK(vkBindBufferMemory, (state->device, buffer_b, memory, size));
+    CALL_VK(vkBindBufferMemory, (state->device, buffer_a, vk_memory, 0));
+    CALL_VK(vkBindBufferMemory, (state->device, buffer_b, vk_memory, size));
 
     descriptor_set_bind(state, buffer_a, size, 0);
     descriptor_set_bind(state, buffer_b, size, 1);
 
-    CALL_VK(vkMapMemory, (state->device, memory,    0, size, 0, &ptr_a));
-    CALL_VK(vkMapMemory, (state->device, memory, size, size, 0, &ptr_b));
+    write_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    write_range.pNext = 0;
+    write_range.memory = vk_memory;
+    write_range.offset = 0;
+    write_range.size = size;
 
-    generate_payload(ptr_a, ELT_COUNT);
+    read_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    read_range.pNext = 0;
+    read_range.memory = vk_memory;
+    read_range.offset = size;
+    read_range.size = size;
+
+    CALL_VK(vkMapMemory, (state->device, vk_memory, 0, size, 0, &ptr));
+    generate_payload(ptr, ELT_COUNT);
     if (state->memory_is_cached) {
         CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &write_range));
     }
+    vkUnmapMemory(state->device, vk_memory);
 
     execute_sum_kernel(state);
 
+    CALL_VK(vkMapMemory, (state->device, vk_memory, size, size, 0, &ptr));
     if (state->memory_is_cached) {
         CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
     }
-
-    check_payload(ptr_b, ELT_COUNT);
+    check_payload(ptr, ELT_COUNT);
+    vkUnmapMemory(state->device, vk_memory);
     printf("\033[36m%s executed\033[0m\n", __func__);
 
-    vkUnmapMemory(state->device, memory);
-    vkUnmapMemory(state->device, memory);
     vkDestroyBuffer(state->device, buffer_a, NULL);
     vkDestroyBuffer(state->device, buffer_b, NULL);
-    vkFreeMemory(state->device, memory, NULL);
+    vkFreeMemory(state->device, vk_memory, NULL);
 }
 
 static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
@@ -832,10 +827,10 @@ static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
     struct gpu_memory a, b;
     void *ptr_a, *ptr_b;
 
-    a = allocate_buffer(state, sizeof(int) * ELT_COUNT);
+    a = allocate_buffer(state, 0, sizeof(int) * ELT_COUNT);
     descriptor_set_bind(state, a.vk_buffer, a.vk_size, 0);
 
-    b = allocate_buffer(state, sizeof(int) * ELT_COUNT);
+    b = allocate_buffer(state, 0, sizeof(int) * ELT_COUNT);
     descriptor_set_bind(state, b.vk_buffer, b.vk_size, 1);
 
     VkMappedMemoryRange write_range = {
@@ -855,24 +850,22 @@ static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
     };
 
     CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr_a));
-    CALL_VK(vkMapMemory, (state->device, b.vk_memory, 0, b.vk_size, 0, &ptr_b));
-
     generate_payload(ptr_a, ELT_COUNT);
     if (state->memory_is_cached) {
         CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &write_range));
     }
+    vkUnmapMemory(state->device, a.vk_memory);
 
     execute_sum_kernel(state);
 
+    CALL_VK(vkMapMemory, (state->device, b.vk_memory, 0, b.vk_size, 0, &ptr_b));
     if (state->memory_is_cached) {
         CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
     }
-
     check_payload(ptr_b, ELT_COUNT);
     printf("\033[36m%s executed\033[0m\n", __func__);
-
-    vkUnmapMemory(state->device, a.vk_memory);
     vkUnmapMemory(state->device, b.vk_memory);
+
     free_buffer(state, &a);
     free_buffer(state, &b);
 }
