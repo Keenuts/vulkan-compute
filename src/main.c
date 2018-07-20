@@ -727,6 +727,8 @@ static void check_memory_upload(struct vulkan_state *state)
 
     vkUnmapMemory(state->device, a.vk_memory);
     printf("\033[36m%s executed\033[0m\n", __func__);
+
+    free_buffer(state, &a);
 }
 
 static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
