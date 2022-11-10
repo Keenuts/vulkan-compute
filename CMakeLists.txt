@@ -1,9 +1,9 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.4)
 project("sum")
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+if (CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     set(DEBUG TRUE)
-endif()
+endif ()
 
 
 set(ELT_COUNT 1024)
@@ -42,29 +42,23 @@ else()
 endif()
 
 # dependencies
-
-find_program(GLSLANG glslangValidator)
-if (NOT GLSLANG)
+if (DEFINED USE_GLSLANG)
+  message("compiler: glslang")
+  find_program(GLSLANG glslangValidator)
+  if (NOT GLSLANG)
     message(FATAL_ERROR "GlslangValidator is missing.")
-endif()
-
-
-if (DEFINED ICD_LIB)
-    message("linking with a custom icd")
-    link_libraries(${ICD_LIB})
+  endif()
+elseif (DEFINED USE_DXC)
+  message("compiler: dxc")
+  find_program(DXC dxc)
+  if (NOT DXC)
+    message(FATAL_ERROR "DXC is missing.")
+  endif()
 else ()
-    link_libraries(vulkan)
-endif()
+  message(FATAL_ERROR "Specify either USE_GLSLANG or USE_DXC")
+endif ()
 
-if (DEFINED VIRGL_LIB)
-    message("linking with localy built static virgl")
-    link_libraries(${VIRGL_LIB})
-    link_libraries(dl)
-    link_libraries(drm)
-    link_libraries(epoxy)
-    link_libraries(gbm)
-    link_libraries(m)
-    link_libraries(pthread)
-endif()
+
+link_libraries(vulkan)
 
 add_subdirectory(src)
