@@ -1,5 +1,9 @@
-cmake_minimum_required(VERSION 3.4)
+cmake_minimum_required(VERSION 3.4 FATAL_ERROR)
 project("sum")
+
+option(SHADER_LANGUAGE "building GLSL or HLSL shader")
+
+message(NOTICE "shader language: ${SHADER_LANGUAGE}")
 
 if (CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     set(DEBUG TRUE)
@@ -24,6 +28,7 @@ set(CMAKE_C_FLAGS_DEBUG "\
     -Wno-unused-function \
     -g \
     -O0 \
+    -fdiagnostics-color=always \
     -Werror"
 )
 
@@ -42,20 +47,25 @@ else()
 endif()
 
 # dependencies
-if (DEFINED USE_GLSLANG)
+if ("${SHADER_LANGUAGE}" MATCHES "GLSL")
   message("compiler: glslang")
+
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_GLSLANG")
   find_program(GLSLANG glslangValidator)
   if (NOT GLSLANG)
     message(FATAL_ERROR "GlslangValidator is missing.")
   endif()
-elseif (DEFINED USE_DXC)
+
+elseif ("${SHADER_LANGUAGE}" MATCHES "HLSL")
   message("compiler: dxc")
+
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_DXC")
   find_program(DXC dxc)
   if (NOT DXC)
     message(FATAL_ERROR "DXC is missing.")
   endif()
 else ()
-  message(FATAL_ERROR "Specify either USE_GLSLANG or USE_DXC")
+  message(FATAL_ERROR "set SHADER_LANGUAGE to either GLSL or HLSL")
 endif ()
 
 

@@ -3,13 +3,14 @@ set(SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/main.c"
 )
 
-if (DEFINED USE_GLSLANG)
+if ("${SHADER_LANGUAGE}" MATCHES "GLSL")
   add_custom_command(
       OUTPUT sum.spv
-      MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/sum.comp"
+      MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/sum.glsl"
       COMMAND ${GLSLANG}
-          -V ${CMAKE_CURRENT_SOURCE_DIR}/sum.comp
-          -o ${CMAKE_BINARY_DIR}/sum.spv
+          -V ${CMAKE_CURRENT_SOURCE_DIR}/sum.glsl
+          -o ${CMAKE_BINARY_DIR}/sum.glsl.spv
+          -S comp
           -DELT_COUNT=${ELT_COUNT}
           -DWORKGROUP_SIZE=${WORKGROUP_SIZE}
           --target-env vulkan1.2
@@ -20,13 +21,13 @@ if (DEFINED USE_GLSLANG)
       shaders ALL
       DEPENDS sum.spv
   )
-else ()
+elseif ("${SHADER_LANGUAGE}" MATCHES "HLSL")
   add_custom_command(
       OUTPUT sum.spv
       MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/sum.hlsl"
       COMMAND ${DXC}
           ${CMAKE_CURRENT_SOURCE_DIR}/sum.hlsl
-          -Fo ${CMAKE_BINARY_DIR}/sum.spv
+          -Fo ${CMAKE_BINARY_DIR}/sum.hlsl.spv
           -DELT_COUNT=${ELT_COUNT}
           -DWORKGROUP_SIZE=${WORKGROUP_SIZE}
           -T cs_6_5
@@ -39,6 +40,8 @@ else ()
       shaders ALL
       DEPENDS sum.spv
   )
+else ()
+  message(FATAL_ERROR "set SHADER_LANGUAGE to either GLSL or HLSL")
 endif ()
 
 add_executable(sum ${SOURCES})
