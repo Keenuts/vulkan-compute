@@ -136,7 +136,7 @@ static struct vulkan_state* create_state(void)
         1,
         "sample-engine",
         1,
-        VK_MAKE_VERSION(1, 0, 0)
+        VK_API_VERSION_1_2
     };
 
     dump_available_layers();
