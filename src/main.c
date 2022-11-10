@@ -142,7 +142,9 @@ static struct vulkan_state* create_state(void)
     dump_available_layers();
 
     const char* validation_layers[] = {
-        //"VK_LAYER_LUNARG_standard_validation",
+#ifdef DEBUG
+        "VK_LAYER_KHRONOS_validation",
+#endif
     };
 
     struct VkInstanceCreateInfo info = {
