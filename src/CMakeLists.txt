@@ -40,8 +40,22 @@ elseif ("${SHADER_LANGUAGE}" MATCHES "HLSL")
       shaders ALL
       DEPENDS sum.spv
   )
+elseif ("${SHADER_LANGUAGE}" MATCHES "WGSL")
+  add_custom_command(
+      OUTPUT sum.spv
+      MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/sum.wgsl"
+      COMMAND ${TINT}
+          ${CMAKE_CURRENT_SOURCE_DIR}/sum.wgsl
+          -o ${CMAKE_BINARY_DIR}/sum.wgsl.spv
+          --format spirv
+  )
+
+  add_custom_target(
+      shaders ALL
+      DEPENDS sum.spv
+  )
 else ()
-  message(FATAL_ERROR "set SHADER_LANGUAGE to either GLSL or HLSL")
+  message(FATAL_ERROR "set SHADER_LANGUAGE to either GLSL,HLSL or WGSL.")
 endif ()
 
 add_executable(sum ${SOURCES})

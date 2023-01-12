@@ -40,10 +40,10 @@ set(CMAKE_C_FLAGS_RELEASE "\
 
 if (DEBUG)
     message("build-type: debug")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG} -DDEBUG")
 else()
     message("build-type: release")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_RELEASE}")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_RELEASE} -DRELEASE")
 endif()
 
 # dependencies
@@ -64,8 +64,15 @@ elseif ("${SHADER_LANGUAGE}" MATCHES "HLSL")
   if (NOT DXC)
     message(FATAL_ERROR "DXC is missing.")
   endif()
+elseif ("${SHADER_LANGUAGE}" MATCHES "WGSL")
+  message("compiler: tint")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_WGSL")
+  find_program(TINT tint)
+  if (NOT TINT)
+    message(FATAL_ERROR "Tint is missing.")
+  endif()
 else ()
-  message(FATAL_ERROR "set SHADER_LANGUAGE to either GLSL or HLSL")
+  message(FATAL_ERROR "set SHADER_LANGUAGE to either GLSL,HLSL or WGSL.")
 endif ()
 
 

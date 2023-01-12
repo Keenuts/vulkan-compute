@@ -14,8 +14,10 @@
 # define SHADER_NAME "sum.hlsl.spv"
 #elif USE_GLSLANG
 # define SHADER_NAME "sum.glsl.spv"
+#elif USE_WGSL
+# define SHADER_NAME "sum.wgsl.spv"
 #else
-# error "USE_DXC or USE_GLSLANG not set"
+# error "USE_DXC, USE_GLSLANG or USE_WGSL not set"
 #endif
 
 #define BUFFER_COUNT 2
@@ -498,7 +500,6 @@ static void free_buffer(struct vulkan_state *state, struct gpu_memory *mem)
     vkFreeMemory(state->device, mem->vk_memory, NULL);
     vkDestroyBuffer(state->device, mem->vk_buffer, NULL);
 }
-
 
 static uint32_t* load_shader(const char *path, size_t *file_length)
 {
