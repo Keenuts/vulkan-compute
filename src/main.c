@@ -34,23 +34,9 @@ struct vulkan_state {
     uint32_t                queue_family_index;
 
     VkDescriptorPool        descriptor_pool;
-    VkCommandPool           command_pool;
-
     VkDescriptorSetLayout   descriptor_layout;
     VkDescriptorSet         descriptor_set;
-    VkPipelineLayout        pipeline_layout;
-    VkPipeline              pipeline;
-    VkShaderModule          shader_module;
-    uint8_t                 memory_is_cached;
 };
-
-struct gpu_memory {
-    void           *buffer;
-    VkDeviceSize    vk_size;
-    VkDeviceMemory  vk_memory;
-    VkBuffer        vk_buffer;
-};
-
 
 static const char* vkresult_to_string(VkResult res)
 {
@@ -289,365 +275,118 @@ static void create_logical_device(struct vulkan_state *state)
     vkGetDeviceQueue(state->device, queue_info.queueFamilyIndex, 0, &state->queue);
 }
 
-static void descriptor_set_layouts_create(struct vulkan_state *state, uint32_t count)
-{
-    VkDescriptorSetLayoutBinding *bindings = malloc(sizeof(*bindings) * count);
-    assert(bindings);
-
-    for (uint32_t i = 0; i < count; i++) {
-        bindings[i].binding = i;
-        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        bindings[i].pImmutableSamplers = NULL;
-    }
-
-    VkDescriptorSetLayoutCreateInfo info = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        NULL,
-        0,
-        count,
-        bindings
-    };
-
-    CALL_VK(vkCreateDescriptorSetLayout,
-            (state->device, &info, NULL, &state->descriptor_layout));
-    free(bindings);
-}
-
-static void descriptor_pool_create(struct vulkan_state *state, uint32_t size)
-{
-    VkDescriptorPoolSize pool_size = {
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        size
-    };
-
-    VkDescriptorPoolCreateInfo info = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        NULL,
-        0 /* no flags */,
-        size,
-        1,
-        &pool_size
-    };
-
-    CALL_VK(vkCreateDescriptorPool,
-            (state->device, &info, NULL, &state->descriptor_pool));
-}
-
-static void command_pool_create(struct vulkan_state *state)
-{
-    VkCommandPoolCreateInfo pool_info = {
-        VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-        NULL,
-        0,
-        state->queue_family_index
-    };
-
-    CALL_VK(vkCreateCommandPool,
-            (state->device, &pool_info, NULL, &state->command_pool));
-}
-
-static void descriptor_set_create(struct vulkan_state *state)
-{
-    VkDescriptorSetAllocateInfo alloc_info = {
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        NULL,
-        state->descriptor_pool,
-        1,
-        &state->descriptor_layout
-    };
-
-    CALL_VK(vkAllocateDescriptorSets,
-            (state->device, &alloc_info, &state->descriptor_set));
-}
-
-static void descriptor_set_bind(struct vulkan_state *state,
-                                VkBuffer buffer,
-                                VkDeviceSize size,
-                                uint32_t binding)
-{
-    VkDescriptorBufferInfo buffer_info = {
-        buffer,
-        0,
-        size,
-    };
-
-    VkWriteDescriptorSet write_info = {
-        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        NULL,
-        state->descriptor_set,
-        binding,
-        0,
-        1,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        NULL,
-        &buffer_info,
-        NULL
-    };
-
-    vkUpdateDescriptorSets(state->device, 1, &write_info, 0, NULL);
-}
-
 static void initialize_device(struct vulkan_state *state)
 {
     select_physical_device(state);
     create_logical_device(state);
-    descriptor_pool_create(state, BUFFER_COUNT);
-    command_pool_create(state);
-    descriptor_set_layouts_create(state, BUFFER_COUNT);
-    descriptor_set_create(state);
-}
 
-static VkDeviceMemory allocate_gpu_memory(struct vulkan_state *state, VkDeviceSize size)
-{
-    uint32_t memory_index = UINT32_MAX;
-    VkPhysicalDeviceMemoryProperties props;
+    // Create pool
+    VkDescriptorPoolSize pool_size[5];
+    pool_size[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    pool_size[0].descriptorCount = 512;
+    pool_size[1].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    pool_size[1].descriptorCount = 512;
+    pool_size[2].type = VK_DESCRIPTOR_TYPE_SAMPLER;
+    pool_size[2].descriptorCount = 512;
+    // The additional descriptors.
+    pool_size[3].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size[3].descriptorCount = 512;
+    pool_size[4].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    pool_size[4].descriptorCount = 512;
 
-    vkGetPhysicalDeviceMemoryProperties(state->phys_device, &props);
+#if 1
+    const size_t DESC_TYPE_COUNT = 3;
+#else
+    const size_t DESC_TYPE_COUNT = 5;
+#endif
 
-    for (uint32_t i = 0; i < props.memoryTypeCount; i++) {
-        VkMemoryType type = props.memoryTypes[i];
-
-        printf("Memory[%d]:\n", i);
-        if (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT & type.propertyFlags)
-            printf("\tVK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT\n");
-        if (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT & type.propertyFlags)
-            printf("\tVK_MEMORY_PROPERTY_HOST_VISIBLE_BIT\n");
-        if (VK_MEMORY_PROPERTY_HOST_COHERENT_BIT & type.propertyFlags)
-            printf("\tVK_MEMORY_PROPERTY_HOST_COHERENT_BIT\n");
-        if (VK_MEMORY_PROPERTY_HOST_CACHED_BIT & type.propertyFlags)
-            printf("\tVK_MEMORY_PROPERTY_HOST_CACHED_BIT\n");
-        if (VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT & type.propertyFlags)
-            printf("\tVK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT\n");
-        if (VK_MEMORY_PROPERTY_PROTECTED_BIT & type.propertyFlags)
-            printf("\tVK_MEMORY_PROPERTY_PROTECTED_BIT\n");
-
-
-        if (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
-            if (0 == (type.propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-                state->memory_is_cached = 1;
-            }
-
-            memory_index = i;
-            break;
-        }
+    size_t max_sets = 0;
+    for (size_t i = 0; i < DESC_TYPE_COUNT; i++) {
+        max_sets += pool_size[i].descriptorCount;
     }
 
-    if (memory_index == UINT32_MAX) {
-        fprintf(stderr, "Compatible memory not found (HOST_VISIBLE).\n");
-        abort();
+
+    VkDescriptorPoolCreateInfo desc_info = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        NULL,
+        0 /* no flags */,
+        max_sets,
+        DESC_TYPE_COUNT,
+        pool_size
+    };
+
+    CALL_VK(vkCreateDescriptorPool,
+            (state->device, &desc_info, NULL, &state->descriptor_pool));
+
+
+    // Create layout
+    VkDescriptorSetLayoutBinding bindings[7];
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[0].pImmutableSamplers = NULL;
+
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[1].pImmutableSamplers = NULL;
+    bindings[2].binding = 2;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[2].pImmutableSamplers = NULL;
+
+    bindings[3].binding = 3;
+    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    bindings[3].descriptorCount = 1;
+    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[3].pImmutableSamplers = NULL;
+    bindings[4].binding = 4;
+    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    bindings[4].descriptorCount = 1;
+    bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[4].pImmutableSamplers = NULL;
+
+    bindings[5].binding = 5;
+    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    bindings[5].descriptorCount = 1;
+    bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[5].pImmutableSamplers = NULL;
+    bindings[6].binding = 6;
+    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    bindings[6].descriptorCount = 1;
+    bindings[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[6].pImmutableSamplers = NULL;
+
+    VkDescriptorSetLayoutCreateInfo layout_info = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        NULL,
+        0,
+        7,
+        bindings
+    };
+
+    CALL_VK(vkCreateDescriptorSetLayout,
+            (state->device, &layout_info, NULL, &state->descriptor_layout));
+
+    size_t allocated_descriptors = 0;
+    // Allocate descriptors
+    for (size_t i = 0; i < 207; i++) {
+        VkDescriptorSetAllocateInfo alloc_info = {
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            NULL,
+            state->descriptor_pool,
+            1,
+            &state->descriptor_layout
+        };
+
+        printf("Allocated descriptors so far: %zu/%zu\n", allocated_descriptors, max_sets);
+        CALL_VK(vkAllocateDescriptorSets,
+                (state->device, &alloc_info, &state->descriptor_set));
+        allocated_descriptors += 7;
     }
-
-    VkMemoryAllocateInfo alloc_info = {
-        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        NULL,
-        size,
-        memory_index
-    };
-
-    VkDeviceMemory vk_memory;
-    CALL_VK(vkAllocateMemory, (state->device, &alloc_info, NULL, &vk_memory));
-
-    return vk_memory;
-}
-
-static VkBuffer create_gpu_buffer(struct vulkan_state *state, VkDeviceSize size)
-{
-    VkBufferCreateInfo buffer_info = {
-        VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        NULL,
-        0,
-        size,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-        VK_SHARING_MODE_EXCLUSIVE,
-        0,
-        NULL /* ignored since marked as exclusive */
-    };
-
-    VkBuffer vk_buffer;
-    CALL_VK(vkCreateBuffer, (state->device, &buffer_info, NULL, &vk_buffer));
-
-    return vk_buffer;
-}
-
-static struct gpu_memory allocate_buffer(struct vulkan_state *state,
-                                         VkDeviceSize offset,
-                                         VkDeviceSize size)
-{
-    VkDeviceMemory vk_memory = allocate_gpu_memory(state, size);
-    VkBuffer vk_buffer = create_gpu_buffer(state, size);
-
-    CALL_VK(vkBindBufferMemory, (state->device, vk_buffer, vk_memory, offset));
-
-    struct gpu_memory info = {
-        NULL,
-        size,
-        vk_memory,
-        vk_buffer,
-    };
-
-    return info;
-}
-
-static void free_buffer(struct vulkan_state *state, struct gpu_memory *mem)
-{
-    if (mem->buffer) {
-        vkUnmapMemory(state->device, mem->vk_memory);
-        mem->buffer = NULL;
-    }
-
-    vkFreeMemory(state->device, mem->vk_memory, NULL);
-    vkDestroyBuffer(state->device, mem->vk_buffer, NULL);
-}
-
-static uint32_t* load_shader(const char *path, size_t *file_length)
-{
-    assert(file_length);
-    uint32_t *content = NULL;
-
-    int fd = open(path, O_RDONLY);
-    if (fd < 0)
-        return NULL;
-
-    do {
-        size_t size = lseek(fd, 0, SEEK_END);
-        lseek(fd, 0, SEEK_SET);
-        if (size == (size_t)-1) {
-            break;
-        }
-
-        content = malloc(size);
-        if (content == NULL) {
-            break;
-        }
-
-        if (read(fd, content, size) < 0) {
-            free(content);
-            content = NULL;
-            break;
-        }
-
-        *file_length = size;
-    } while (0);
-
-    close(fd);
-    return content;
-}
-
-static void create_pipeline(struct vulkan_state *state,
-                            const uint32_t *shader,
-                            uint32_t shader_len)
-{
-    VkShaderModuleCreateInfo shader_info = {
-        VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        NULL,
-        0,
-        shader_len,
-        shader
-    };
-
-    CALL_VK(vkCreateShaderModule,
-            (state->device, &shader_info, NULL, &state->shader_module));
-
-    VkPipelineShaderStageCreateInfo shader_stage_creation_info = {
-        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-        NULL,
-        0,
-        VK_SHADER_STAGE_COMPUTE_BIT,
-        state->shader_module,
-        SHADER_ENTRY_POINT,
-        NULL
-    };
-
-    VkPipelineLayoutCreateInfo layout_info = {
-        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        NULL,
-        0,
-        1,
-        &state->descriptor_layout,
-        0,
-        NULL
-    };
-
-    CALL_VK(vkCreatePipelineLayout,
-            (state->device, &layout_info, NULL, &state->pipeline_layout));
-
-    VkComputePipelineCreateInfo pipeline_info = {
-        VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
-        NULL,
-        0,
-        shader_stage_creation_info,
-        state->pipeline_layout,
-        VK_NULL_HANDLE,
-        0
-    };
-
-    CALL_VK(vkCreateComputePipelines,
-            (state->device, VK_NULL_HANDLE, 1, &pipeline_info, NULL, &state->pipeline));
-}
-
-static void execute_sum_kernel(struct vulkan_state *state)
-{
-    VkCommandBuffer command_buffer;
-
-    VkCommandBufferAllocateInfo alloc_info = {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        NULL,
-        state->command_pool,
-        VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        1
-    };
-
-    CALL_VK(vkAllocateCommandBuffers, (state->device, &alloc_info, &command_buffer));
-
-    VkCommandBufferBeginInfo begin_info = {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        NULL,
-        VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        NULL
-    };
-
-    CALL_VK(vkBeginCommandBuffer, (command_buffer, &begin_info));
-
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, state->pipeline);
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            state->pipeline_layout,
-                            0,
-                            1,
-                            &state->descriptor_set,
-                            0,
-                            NULL);
-
-    vkCmdDispatch(command_buffer, ELT_COUNT / WORKGROUP_SIZE, 1, 1);
-
-    CALL_VK(vkEndCommandBuffer, (command_buffer));
-
-    VkSubmitInfo submit_info = {
-        VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        NULL,
-        0,
-        NULL,
-        NULL,
-        1,
-        &command_buffer,
-        0,
-        NULL
-    };
-
-    VkFence fence;
-    VkFenceCreateInfo fence_info = {
-        VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        NULL,
-        0
-    };
-
-    CALL_VK(vkCreateFence, (state->device, &fence_info, NULL, &fence));
-
-    CALL_VK(vkQueueSubmit, (state->queue, 1, &submit_info, fence));
-    CALL_VK(vkWaitForFences, (state->device, 1, &fence, VK_TRUE, 1e9 * 5));
-
-    vkDestroyFence(state->device, fence, NULL);
 }
 
 static void destroy_state(struct vulkan_state **state)
@@ -659,12 +398,8 @@ static void destroy_state(struct vulkan_state **state)
     if (st->Field != VK_NULL_HANDLE)            \
         Function(st->device, st->Field, NULL)
 
-    FREE_VK(shader_module, vkDestroyShaderModule);
     FREE_VK(descriptor_pool, vkDestroyDescriptorPool);
     FREE_VK(descriptor_layout, vkDestroyDescriptorSetLayout);
-    FREE_VK(pipeline_layout, vkDestroyPipelineLayout);
-    FREE_VK(pipeline, vkDestroyPipeline);
-    FREE_VK(command_pool, vkDestroyCommandPool);
 
     if (st->device != VK_NULL_HANDLE)
         vkDestroyDevice(st->device, NULL);
@@ -675,251 +410,18 @@ static void destroy_state(struct vulkan_state **state)
     *state = NULL;
 }
 
-
-/* Application logic */
-
-static void generate_payload(int *buffer, int elt_count)
-{
-    for (int i = 0; i < elt_count; i++) {
-        buffer[i] = i;
-    }
-}
-
-static void check_payload(int *buffer, int elt_count)
-{
-    for (int i = 0; i < elt_count; i++) {
-        if (buffer[i] != i + i) {
-            fprintf(stderr, "invalid value for [%d]. got %d, expected %d\n",
-                    i, buffer[i], i + i);
-            abort();
-        }
-    }
-}
-
-static void check_memory_upload(struct vulkan_state *state)
-{
-    struct gpu_memory a;
-    void *ptr = NULL;
-    VkMappedMemoryRange range;
-    const size_t size = ELT_COUNT * sizeof(int);
-    void *local = NULL;
-
-    local = malloc(size);
-    generate_payload(local, ELT_COUNT);
-
-    a = allocate_buffer(state, 0, size);
-    memset(&range, 0, sizeof(range));
-    range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    range.memory = a.vk_memory;
-    range.size = a.vk_size;
-
-    /* writting and unmapping */
-    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
-
-    memcpy(ptr, local, size);
-
-    if (state->memory_is_cached) {
-        CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &range));
-    }
-
-    vkUnmapMemory(state->device, a.vk_memory);
-
-
-    /* remapping and reading back */
-    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
-    if (state->memory_is_cached) {
-        CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &range));
-    }
-
-    if (0 != memcmp(ptr, local, size)) {
-        fprintf(stderr, "identity check failed\n");
-        abort();
-    }
-
-    vkUnmapMemory(state->device, a.vk_memory);
-    printf("\033[36m%s executed\033[0m\n", __func__);
-
-    free_buffer(state, &a);
-}
-
-static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
-{
-    struct gpu_memory a;
-    void *ptr;
-
-    a = allocate_buffer(state, 0, sizeof(int) * ELT_COUNT);
-    descriptor_set_bind(state, a.vk_buffer, a.vk_size, 0);
-    descriptor_set_bind(state, a.vk_buffer, a.vk_size, 1);
-
-    VkMappedMemoryRange range = {
-        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-        NULL,
-        a.vk_memory,
-        0,
-        a.vk_size
-    };
-
-    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
-
-    generate_payload(ptr, ELT_COUNT);
-
-    if (state->memory_is_cached) {
-        CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &range));
-    }
-
-    execute_sum_kernel(state);
-
-    if (state->memory_is_cached) {
-        CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &range));
-    }
-
-    check_payload(ptr, ELT_COUNT);
-    printf("\033[36m%s executed\033[0m\n", __func__);
-
-    vkUnmapMemory(state->device, a.vk_memory);
-    free_buffer(state, &a);
-}
-
-static void do_sum_two_buffer_one_memory(struct vulkan_state *state)
-{
-    VkBuffer buffer_a, buffer_b;
-    VkDeviceMemory vk_memory;
-    VkMappedMemoryRange write_range, read_range;
-    const VkDeviceSize size = ELT_COUNT * sizeof(int);
-    void *ptr = NULL;
-
-    vk_memory = allocate_gpu_memory(state, size * 2);
-    buffer_a = create_gpu_buffer(state, size);
-    buffer_b = create_gpu_buffer(state, size);
-
-    CALL_VK(vkBindBufferMemory, (state->device, buffer_a, vk_memory, 0));
-    CALL_VK(vkBindBufferMemory, (state->device, buffer_b, vk_memory, size));
-
-    descriptor_set_bind(state, buffer_a, size, 0);
-    descriptor_set_bind(state, buffer_b, size, 1);
-
-    write_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    write_range.pNext = 0;
-    write_range.memory = vk_memory;
-    write_range.offset = 0;
-    write_range.size = size;
-
-    read_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    read_range.pNext = 0;
-    read_range.memory = vk_memory;
-    read_range.offset = size;
-    read_range.size = size;
-
-    CALL_VK(vkMapMemory, (state->device, vk_memory, 0, size, 0, &ptr));
-    generate_payload(ptr, ELT_COUNT);
-    if (state->memory_is_cached) {
-        CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &write_range));
-    }
-    vkUnmapMemory(state->device, vk_memory);
-
-    execute_sum_kernel(state);
-
-    CALL_VK(vkMapMemory, (state->device, vk_memory, size, size, 0, &ptr));
-    if (state->memory_is_cached) {
-        CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
-    }
-    check_payload(ptr, ELT_COUNT);
-    vkUnmapMemory(state->device, vk_memory);
-    printf("\033[36m%s executed\033[0m\n", __func__);
-
-    vkDestroyBuffer(state->device, buffer_a, NULL);
-    vkDestroyBuffer(state->device, buffer_b, NULL);
-    vkFreeMemory(state->device, vk_memory, NULL);
-}
-
-static void do_sum_two_buffer_two_memory(struct vulkan_state *state)
-{
-    struct gpu_memory a, b;
-    void *ptr_a, *ptr_b;
-
-    a = allocate_buffer(state, 0, sizeof(int) * ELT_COUNT);
-    descriptor_set_bind(state, a.vk_buffer, a.vk_size, 0);
-
-    b = allocate_buffer(state, 0, sizeof(int) * ELT_COUNT);
-    descriptor_set_bind(state, b.vk_buffer, b.vk_size, 1);
-
-    VkMappedMemoryRange write_range = {
-        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-        NULL,
-        a.vk_memory,
-        0,
-        a.vk_size
-    };
-
-    VkMappedMemoryRange read_range = {
-        VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
-        NULL,
-        b.vk_memory,
-        0,
-        b.vk_size
-    };
-
-    CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr_a));
-    generate_payload(ptr_a, ELT_COUNT);
-    if (state->memory_is_cached) {
-        CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &write_range));
-    }
-    vkUnmapMemory(state->device, a.vk_memory);
-
-    execute_sum_kernel(state);
-
-    CALL_VK(vkMapMemory, (state->device, b.vk_memory, 0, b.vk_size, 0, &ptr_b));
-    if (state->memory_is_cached) {
-        CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &read_range));
-    }
-    check_payload(ptr_b, ELT_COUNT);
-    printf("\033[36m%s executed\033[0m\n", __func__);
-    vkUnmapMemory(state->device, b.vk_memory);
-
-    free_buffer(state, &a);
-    free_buffer(state, &b);
-}
-
 int main(int argc, char **argv)
 {
     if (argc <= 0)
         return 1;
 
     struct vulkan_state *state = NULL;
-    uint32_t *shader_code = NULL;
-    size_t shader_length;
 
     state = create_state();
     if (state == NULL)
         return 1;
 
     initialize_device(state);
-
-    char *path = dirname(strdup(argv[0]));
-    size_t pathlen = strlen(path) + strlen(SHADER_NAME) + 2;
-    path = realloc(path, pathlen);
-    strcat(path, "/" SHADER_NAME);
-
-    shader_code = load_shader(path, &shader_length);
-    printf("path: %s\n", path);
-    free(path);
-    path = NULL;
-
-
-    if (shader_code == NULL) {
-        fprintf(stderr, "unable to load the shader.\n");
-        destroy_state(&state);
-        return 2;
-    }
-
-    create_pipeline(state, shader_code, shader_length);
-
-    check_memory_upload(state);
-    do_sum_one_buffer_one_memory(state);
-    do_sum_two_buffer_one_memory(state);
-    do_sum_two_buffer_two_memory(state);
-
-    free(shader_code);
     destroy_state(&state);
 
     puts("bye bye");
