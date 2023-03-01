@@ -1,10 +1,6 @@
 cmake_minimum_required(VERSION 3.4 FATAL_ERROR)
 project("sum")
 
-option(SHADER_LANGUAGE "building GLSL or HLSL shader")
-
-message(NOTICE "shader language: ${SHADER_LANGUAGE}")
-
 if (CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     set(DEBUG TRUE)
 endif ()
@@ -45,36 +41,6 @@ else()
     message("build-type: release")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_RELEASE} -DRELEASE")
 endif()
-
-# dependencies
-if ("${SHADER_LANGUAGE}" MATCHES "GLSL")
-  message("compiler: glslang")
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_GLSLANG")
-  find_program(GLSLANG glslangValidator)
-  if (NOT GLSLANG)
-    message(FATAL_ERROR "GlslangValidator is missing.")
-  endif()
-
-elseif ("${SHADER_LANGUAGE}" MATCHES "HLSL")
-  message("compiler: dxc")
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_DXC")
-  find_program(DXC dxc)
-  if (NOT DXC)
-    message(FATAL_ERROR "DXC is missing.")
-  endif()
-elseif ("${SHADER_LANGUAGE}" MATCHES "WGSL")
-  message("compiler: tint")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_WGSL")
-  find_program(TINT tint)
-  if (NOT TINT)
-    message(FATAL_ERROR "Tint is missing.")
-  endif()
-else ()
-  message(FATAL_ERROR "set SHADER_LANGUAGE to either GLSL,HLSL or WGSL.")
-endif ()
-
 
 link_libraries(vulkan)
 
