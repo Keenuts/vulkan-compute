@@ -116,6 +116,71 @@ static void dump_available_layers(void)
     free(layers);
 }
 
+static void dump_available_instance_extensions(void)
+{
+    uint32_t count;
+    CALL_VK(vkEnumerateInstanceExtensionProperties, (NULL, &count, NULL));
+    if (count == 0) {
+        fprintf(stderr, "no instance extension available.\n");
+        return;
+    }
+
+    VkExtensionProperties *array = malloc(sizeof(*array) * count);
+    assert(array);
+
+
+    CALL_VK(vkEnumerateInstanceExtensionProperties, (NULL, &count, array));
+
+    fprintf(stderr, "instance extensions:\n");
+    for (uint32_t i = 0; i < count; i++) {
+        fprintf(stderr, "\t%s\n", array[i].extensionName);
+    }
+    free(array);
+}
+
+static void dump_device_layers(VkPhysicalDevice device)
+{
+    uint32_t count;
+    CALL_VK(vkEnumerateDeviceLayerProperties, (device, &count, NULL));
+    if (count == 0) {
+        fprintf(stderr, "no layers available.\n");
+        return;
+    }
+
+    VkLayerProperties *layers = malloc(sizeof(*layers) * count);
+    assert(layers);
+
+
+    CALL_VK(vkEnumerateDeviceLayerProperties, (device, &count, layers));
+    fprintf(stderr, "layers:\n");
+    for (uint32_t i = 0; i < count; i++) {
+        fprintf(stderr, "\t%s: %s\n", layers[i].layerName, layers[i].description);
+    }
+    free(layers);
+}
+
+static void dump_device_extensions(VkPhysicalDevice device)
+{
+    uint32_t count;
+    CALL_VK(vkEnumerateDeviceExtensionProperties, (device, NULL, &count, NULL));
+    if (count == 0) {
+        fprintf(stderr, "no device extension available.\n");
+        return;
+    }
+
+    VkExtensionProperties *array = malloc(sizeof(*array) * count);
+    assert(array);
+
+
+    CALL_VK(vkEnumerateDeviceExtensionProperties, (device, NULL, &count, array));
+
+    fprintf(stderr, "device extensions:\n");
+    for (uint32_t i = 0; i < count; i++) {
+        fprintf(stderr, "\t%s\n", array[i].extensionName);
+    }
+    free(array);
+}
+
 static struct vulkan_state* create_state(void)
 {
     struct vulkan_state *state = malloc(sizeof(*state));
@@ -135,11 +200,15 @@ static struct vulkan_state* create_state(void)
     };
 
     dump_available_layers();
+    dump_available_instance_extensions();
 
     const char* validation_layers[] = {
 #ifdef DEBUG
         "VK_LAYER_KHRONOS_validation",
 #endif
+    };
+
+    const char* extensions[] = {
     };
 
     struct VkInstanceCreateInfo info = {
@@ -149,8 +218,8 @@ static struct vulkan_state* create_state(void)
         &app_info,
         sizeof(validation_layers) / sizeof(*validation_layers),
         validation_layers,
-        0,
-        NULL
+        sizeof(extensions) / sizeof(*extensions),
+        extensions,
     };
 
     CALL_VK(vkCreateInstance, (&info, NULL, &state->instance));
@@ -258,6 +327,18 @@ static void create_logical_device(struct vulkan_state *state)
 {
     VkDeviceQueueCreateInfo queue_info = find_queue(state);
 
+    //dump_device_layers(state->phys_device);
+    //dump_device_extensions(state->phys_device);
+
+    const char* extensions[] = {
+#if 0
+        "VK_KHR_maintenance1",
+        "VK_KHR_maintenance2",
+        "VK_KHR_maintenance3",
+        "VK_KHR_maintenance4",
+#endif
+    };
+
     struct VkDeviceCreateInfo info = {
         VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         NULL,
@@ -266,8 +347,8 @@ static void create_logical_device(struct vulkan_state *state)
         &queue_info,
         0,
         NULL,
-        0,
-        NULL,
+        sizeof(extensions) / sizeof(*extensions),
+        extensions,
         NULL
     };
 
@@ -309,7 +390,7 @@ static void initialize_device(struct vulkan_state *state)
     VkDescriptorPoolCreateInfo desc_info = {
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         NULL,
-        0 /* no flags */,
+        VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
         max_sets,
         DESC_TYPE_COUNT,
         pool_size
