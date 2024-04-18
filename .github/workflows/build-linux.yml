@@ -1,0 +1,22 @@
+name: 'Linux build'
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  merge_group:
+
+jobs:
+  build:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - name: setup dependencies
+        run: sudo apt update && sudo apt install libvulkan-dev glslang-tools ninja-build mesa-vulkan-drivers
+      - uses: actions/checkout@v3
+      - name: configure
+        run: cmake -H. -Bbuild -GNinja -DSHADER_LANGUAGE=GLSL
+      - name: build
+        run: ninja -C build
+      - name: test
+        run: ./build/sum
