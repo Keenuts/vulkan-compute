@@ -10,15 +10,41 @@ on:
   merge_group:
 
 jobs:
-  build:
+  glsl:
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: setup dependencies
         run: sudo apt update && sudo apt install libvulkan-dev glslang-tools ninja-build mesa-vulkan-drivers
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: configure
         run: cmake -H. -Bbuild -GNinja -DSHADER_LANGUAGE=GLSL
+      - name: build
+        run: ninja -C build
+      - name: test
+        run: ./build/sum
+  hlsl:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - name: setup dependencies
+        run: sudo apt update && sudo apt install libvulkan-dev ninja-build mesa-vulkan-drivers
+      - name: install SDK
+        run: |
+          wget -q https://sdk.lunarg.com/sdk/download/1.3.280.1/linux/vulkansdk-linux-x86_64-1.3.280.1.tar.xz
+          if ! echo "0bdd5dfc32891eccd38d3377570346040bbdb8921d5294c7ca0f27e0c8ba7332 vulkansdk-linux-x86_64-1.3.280.1.tar.xz" | sha256sum -c --status; then
+            echo "Invalid SHA256 for VulkanSDK's binary. Aborting"
+            exit 1
+          fi
+          mkdir "${HOME}/vulkan-sdk"
+          tar -xf vulkansdk-linux-x86_64-1.3.280.1.tar.xz -C "${HOME}/vulkan-sdk"
+          echo "VULKAN_SDK=${HOME}/vulkan-sdk/1.3.280.1/x86_64" >> $GITHUB_ENV
+          echo "VK_LAYER_PATH=${HOME}/vulkan-sdk/1.3.280.1/x86_64/etc/vulkan/explicit_layer.d" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=${HOME}/vulkan-sdk/1.3.280.1/x86_64/lib/" >> $GITHUB_ENV
+          echo "${HOME}/vulkan-sdk/1.3.280.1/x86_64/bin/" >> $GITHUB_PATH
+      - uses: actions/checkout@v4
+      - name: configure
+        run: cmake -H. -Bbuild -GNinja -DSHADER_LANGUAGE=HLSL
       - name: build
         run: ninja -C build
       - name: test
