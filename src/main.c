@@ -570,6 +570,13 @@ static void create_pipeline(struct vulkan_state *state,
         NULL
     };
 
+    VkPushConstantRange ranges = {};
+    ranges.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    ranges.offset = 0;
+    ranges.size = 4;
+    layout_info.pushConstantRangeCount = 1;
+    layout_info.pPushConstantRanges = &ranges;
+
     CALL_VK(vkCreatePipelineLayout,
             (state->device, &layout_info, NULL, &state->pipeline_layout));
 
@@ -619,7 +626,19 @@ static void execute_sum_kernel(struct vulkan_state *state)
                             0,
                             NULL);
 
-    vkCmdDispatch(command_buffer, ELT_COUNT / WORKGROUP_SIZE, 1, 1);
+    int value = 42;
+    vkCmdPushConstants(command_buffer,
+            state->pipeline_layout,
+            VK_SHADER_STAGE_COMPUTE_BIT,
+            0,
+            sizeof(int),
+            &value);
+
+
+    // const size_t WORKGROUP_SIZE = 32;
+    // const size_t ELT_COUNT = 128;
+    // 128 / 32 = 4
+    vkCmdDispatch(command_buffer, 2, 2, 2);
 
     CALL_VK(vkEndCommandBuffer, (command_buffer));
 
@@ -685,14 +704,36 @@ static void generate_payload(int *buffer, int elt_count)
     }
 }
 
-static void check_payload(int *buffer, int elt_count)
+static void check_payload(unsigned *buffer, size_t size)
 {
-    for (int i = 0; i < elt_count; i++) {
-        if (buffer[i] != i + i) {
-            fprintf(stderr, "invalid value for [%d]. got %d, expected %d\n",
-                    i, buffer[i], i + i);
-            abort();
+    const size_t BLOCK_SIZE = 3 * 4; // 4 x uint4
+    for (size_t i = 0; i < size / sizeof(unsigned); i += BLOCK_SIZE) {
+        size_t idx = i;
+  //buffer_out[FID * 4 + 0] = uint4(FID * 4,    FID,     GI,      0);
+  //buffer_out[FID * 4 + 1] = uint4(FID * 4,  GID.x,  GID.y,  GID.z);
+  //buffer_out[FID * 4 + 2] = uint4(FID * 4, GTID.x, GTID.y, GTID.z);
+  //buffer_out[FID * 4 + 3] = uint4(FID * 4, DTID.x, DTID.y, DTID.z);
+
+#if 1
+        //printf("# ------+--------------------------------\n");
+        //printf("#           |     FID   |  GID.x |  GID.y |   GID.z\n");
+        //printf("#           |      GI   | GTID.x | GTID.y |  GTID.z\n");
+        //printf("#           |       0   | DTID.x | DTID.y |  DTID.z\n");
+        const char* keys[] = {
+            "FID",  "GID.x",  "GID.y",  "GID.z",
+             "GI", "GTID.x", "GTID.y", "GTID.z",
+               "", "DTID.x", "DTID.y", "DTID.z"
+        };
+        for (size_t j = 0; j < 4 * 3; j++) {
+            if (keys[j][0] == 0)
+                continue;
+            printf("#              %s\n", keys[j]);
+            printf("# CHECK-DAG: 0x%X\n", buffer[idx + j]);
+            printf("# CHECK-DAG: ,\n");
         }
+        printf("# ------+--------------------------------\n");
+#else
+#endif
     }
 }
 
@@ -701,11 +742,11 @@ static void check_memory_upload(struct vulkan_state *state)
     struct gpu_memory a;
     void *ptr = NULL;
     VkMappedMemoryRange range;
-    const size_t size = ELT_COUNT * sizeof(int);
+    const size_t size = ELT_COUNT * sizeof(unsigned int) * 4;
     void *local = NULL;
 
     local = malloc(size);
-    generate_payload(local, ELT_COUNT);
+    generate_payload(local, ELT_COUNT * 4);
 
     a = allocate_buffer(state, 0, size);
     memset(&range, 0, sizeof(range));
@@ -747,7 +788,11 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
     struct gpu_memory a;
     void *ptr;
 
-    a = allocate_buffer(state, 0, sizeof(int) * ELT_COUNT);
+    const size_t SIZE =
+        sizeof(unsigned int) * 4 * 3 /* uint4 * 4 */
+        * (2 * 2 * 2)  /* numthreads(2, 2, 2) */
+        * (2 * 2 * 2); /* dispatch(2, 2, 2) */
+    a = allocate_buffer(state, 0, SIZE);
     descriptor_set_bind(state, a.vk_buffer, a.vk_size, 0);
     descriptor_set_bind(state, a.vk_buffer, a.vk_size, 1);
 
@@ -760,8 +805,8 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
     };
 
     CALL_VK(vkMapMemory, (state->device, a.vk_memory, 0, a.vk_size, 0, &ptr));
-
-    generate_payload(ptr, ELT_COUNT);
+    memset(ptr, 0, SIZE);
+    //generate_payload(ptr, SIZE);
 
     if (state->memory_is_cached) {
         CALL_VK(vkFlushMappedMemoryRanges, (state->device, 1, &range));
@@ -773,7 +818,7 @@ static void do_sum_one_buffer_one_memory(struct vulkan_state *state)
         CALL_VK(vkInvalidateMappedMemoryRanges, (state->device, 1, &range));
     }
 
-    check_payload(ptr, ELT_COUNT);
+    check_payload(ptr, SIZE);
     printf("\033[36m%s executed\033[0m\n", __func__);
 
     vkUnmapMemory(state->device, a.vk_memory);
@@ -916,8 +961,8 @@ int main(int argc, char **argv)
 
     check_memory_upload(state);
     do_sum_one_buffer_one_memory(state);
-    do_sum_two_buffer_one_memory(state);
-    do_sum_two_buffer_two_memory(state);
+    //do_sum_two_buffer_one_memory(state);
+    //do_sum_two_buffer_two_memory(state);
 
     free(shader_code);
     destroy_state(&state);
