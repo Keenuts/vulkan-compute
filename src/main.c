@@ -10,15 +10,15 @@
 #include <unistd.h>
 #include <vulkan/vulkan.h>
 
-#ifdef USE_DXC
-# define SHADER_NAME "sum.hlsl.spv"
-#elif USE_GLSLANG
-# define SHADER_NAME "sum.glsl.spv"
-#elif USE_WGSL
-# define SHADER_NAME "sum.wgsl.spv"
-#else
-# error "USE_DXC, USE_GLSLANG or USE_WGSL not set"
-#endif
+//#ifdef USE_DXC
+# define SHADER_NAME "../sum.hlsl.spv"
+//#elif USE_GLSLANG
+//# define SHADER_NAME "../sum.glsl.spv"
+//#elif USE_WGSL
+//# define SHADER_NAME "../sum.wgsl.spv"
+//#else
+//# error "USE_DXC, USE_GLSLANG or USE_WGSL not set"
+//#endif
 
 #define BUFFER_COUNT 2
 #define SHADER_ENTRY_POINT "main"
